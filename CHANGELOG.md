@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 — 2026-09-15
+
+- Add resumable direct R2 snapshot export and import using short-lived signed
+  multipart requests. The compute host verifies complete artifact checksums and
+  never receives the control plane's long-lived object-storage credential.
+- Upload parts concurrently, persist R2 receipts across retries, and resume
+  ranged downloads before atomically publishing a restored snapshot locally.
+- Restrict direct-transfer destinations to Cloudflare R2 S3 endpoints and keep
+  signed requests out of the durable lifecycle journal.
+
 ## 1.2.1 — 2026-09-15
 
 - Increase resumable hosted snapshot chunks from 768 KiB to 8 MiB so large
