@@ -11,6 +11,13 @@ computer can be snapshotted or restored; unknown state is never sufficient.
 Snapshots are private host-local artifacts until the control plane copies them
 elsewhere. Their existence alone does not provide host-loss recovery.
 
+For R2 archives, `snapshot-export` and `snapshot-import-direct` accept
+short-lived signed requests for one immutable object. The compute host verifies
+the complete artifact checksum and transfers bounded multipart passes directly
+to or from the R2 S3 endpoint. Part receipts survive retries, while long-lived
+object-store credentials remain only on the control plane. The checksummed chunk
+routes below remain available for non-S3 archive disks.
+
 ## Snapshot and restore
 
 POST `/machines/{id}/snapshot`, `/restore`, or `/snapshot-delete`:

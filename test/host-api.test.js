@@ -404,6 +404,28 @@ test('storage rejects running snapshots, arbitrary paths, stale generations and 
   await assert.rejects(s.send(`machines/${id}/snapshot-write`, { snapshot_id: randomUUID(), offset: 0, sha256: 'a'.repeat(64), data: 'x'.repeat(SNAPSHOT_CHUNK_ENCODED_BYTES + 1) }), e => e.status === 400);
 });
 
+test('direct snapshot transfers keep signed grants out of the durable lifecycle journal', async t => {
+  const s = setup(t); const id = s.create.id, snapshotId = randomUUID();
+  await s.send('machines', s.create);
+  const manifest = { id: snapshotId, artifact_bytes: 12, artifact_sha256: 'a'.repeat(64) };
+  s.runtime.snapshotManifest = async () => manifest;
+  s.runtime.storageOperation = async (_id, verb, body) => {
+    assert.ok(['snapshot-import', 'snapshot-seal'].includes(verb));
+    assert.equal(body.snapshot_id, snapshotId);
+    return verb === 'snapshot-import' ? { offset: 0, complete: false } : manifest;
+  };
+  const calls = [];
+  s.api.snapshotTransfer = {
+    upload: async (...args) => { calls.push(['upload', ...args]); return { complete: true, uploaded_bytes: 12, parts: [] }; },
+    download: async (...args) => { calls.push(['download', ...args]); return { complete: true, downloaded_bytes: 12 }; },
+  };
+  const grant = { version: 1, transfer_id: 'signed-secret' };
+  assert.equal((await s.send(`machines/${id}/snapshot-export`, { snapshot_id: snapshotId, grant })).body.data.complete, true);
+  assert.equal((await s.send(`machines/${id}/snapshot-import-direct`, { snapshot_id: snapshotId, manifest, grant })).body.data.complete, true);
+  assert.equal(calls.length, 2);
+  assert.doesNotMatch(readFileSync(s.file, 'utf8'), /signed-secret/);
+});
+
 test('source fencing is durable before runtime call and blocks delayed successful starts after reload', async t => {
   const s = setup(t); const id = s.create.id;
   await s.send('machines', s.create);

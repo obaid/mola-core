@@ -8,21 +8,34 @@ export const SNAPSHOT_CHUNK_ENCODED_BYTES = Math.ceil(SNAPSHOT_CHUNK_BYTES / 3) 
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const stable = value => JSON.stringify(value, (_, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
-export const STORAGE_VERBS = ['snapshot', 'restore', 'snapshot-delete', 'snapshot-import', 'snapshot-write', 'snapshot-read', 'snapshot-seal', 'fence'];
+export const STORAGE_VERBS = ['snapshot', 'restore', 'snapshot-delete', 'snapshot-import', 'snapshot-write', 'snapshot-read', 'snapshot-seal', 'snapshot-export', 'snapshot-import-direct', 'fence'];
 const fields = {
   snapshot: ['snapshot_id'], restore: ['snapshot_id'], 'snapshot-delete': ['snapshot_id'],
   'snapshot-import': ['snapshot_id', 'manifest'], 'snapshot-write': ['snapshot_id', 'offset', 'data', 'sha256'],
-  'snapshot-read': ['snapshot_id', 'offset'], 'snapshot-seal': ['snapshot_id'], fence: [],
+  'snapshot-read': ['snapshot_id', 'offset'], 'snapshot-seal': ['snapshot_id'],
+  'snapshot-export': ['snapshot_id', 'grant'], 'snapshot-import-direct': ['snapshot_id', 'manifest', 'grant'], fence: [],
 };
 
 /** Durable intent for disk mutations; chunks use their offset and digest as an
  * idempotency identity and never put bulk payloads into the registry journal. */
 export async function storageOperation(api, id, verb, body) {
   const record = api.record(id);
-  const chunk = ['snapshot-write', 'snapshot-read'].includes(verb);
+  const chunk = ['snapshot-write', 'snapshot-read', 'snapshot-export', 'snapshot-import-direct'].includes(verb);
   if (Object.keys(body).some(key => ![...fields[verb], ...(chunk ? [] : ['operation_id', 'generation'])].includes(key))) fail(400, 'Unknown storage operation field.');
   if (verb !== 'fence' && !UUID.test(body.snapshot_id || '')) fail(400, 'snapshot_id must be a UUID.');
   if (chunk) {
+    if (['snapshot-export', 'snapshot-import-direct'].includes(verb)) {
+      if (!api.snapshotTransfer || !body.grant || typeof body.grant !== 'object' || Array.isArray(body.grant)) fail(400, 'Invalid direct snapshot transfer grant.');
+      if (verb === 'snapshot-export') {
+        const manifest = await api.runtime.snapshotManifest(id, body.snapshot_id);
+        return { status: 200, body: { data: await api.snapshotTransfer.upload(id, body.snapshot_id, manifest, body.grant) } };
+      }
+      if (!body.manifest || typeof body.manifest !== 'object' || Array.isArray(body.manifest)) fail(400, 'Invalid snapshot manifest.');
+      await api.runtime.storageOperation(id, 'snapshot-import', { snapshot_id: body.snapshot_id, manifest: body.manifest });
+      const imported = await api.snapshotTransfer.download(id, body.snapshot_id, body.manifest, body.grant);
+      if (imported.complete) await api.runtime.storageOperation(id, 'snapshot-seal', { snapshot_id: body.snapshot_id });
+      return { status: 200, body: { data: imported } };
+    }
     if (!Number.isSafeInteger(body.offset) || body.offset < 0) fail(400, 'offset must be a nonnegative integer.');
     if (verb === 'snapshot-write' && (typeof body.data !== 'string' || body.data.length > SNAPSHOT_CHUNK_ENCODED_BYTES
       || !/^[0-9a-f]{64}$/.test(body.sha256 || ''))) fail(400, 'Invalid snapshot chunk.');
