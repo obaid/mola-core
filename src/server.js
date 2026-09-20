@@ -9,6 +9,7 @@ import { guestKey } from './keys.js';
 import { HostApi, hostToken } from './host-api.js';
 import { SNAPSHOT_CHUNK_ENCODED_BYTES } from './host-storage.js';
 import { attachSsh } from './ssh.js';
+import { SnapshotTransfer } from './snapshot-transfer.js';
 
 const json = (response, status, body) => {
   const payload = JSON.stringify(body, null, 2);
@@ -39,6 +40,7 @@ export async function createServer({ host, port, registry = new Registry(), runt
       })}`, expires_in: 60,
     }),
     action: runAction,
+    snapshotTransfer: new SnapshotTransfer(),
   });
 
   await runtime.start();

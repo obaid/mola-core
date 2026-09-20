@@ -54,8 +54,8 @@ export function hostDescription(record, runtime, settledOperationKey = null) {
  * Tombstones and results are retained to fence delayed messages after deletion.
  */
 export class HostApi {
-  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', desktop, action }) {
-    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action });
+  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', desktop, action, snapshotTransfer = null }) {
+    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, snapshotTransfer });
     this.locks = new Map();
   }
 
