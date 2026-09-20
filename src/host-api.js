@@ -195,6 +195,7 @@ export class HostApi {
         const priorIntent = Object.values(record.cloud.operations).some(operation => {
           const payload = JSON.parse(operation.fingerprint);
           return payload.generation === body.generation && operation.verb !== 'create'
+            && !(operation.verb === 'restore' && payload.fork === true)
             && !Object.hasOwn(payload, 'image_ref');
         });
         if (priorIntent) fail(409, 'A new start requires a new boot generation.');
