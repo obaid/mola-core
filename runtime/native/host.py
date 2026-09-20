@@ -494,12 +494,17 @@ class Runner:
                                 '--image', str(self.image), '--disk', str(temporary), '--architecture', self.arch],
                                check=True, capture_output=True, timeout=900)
                 with temporary.open('rb') as stream: os.fsync(stream.fileno())
+            if payload.get('fork', False):
+                subprocess.run(['python3', str(Path(__file__).with_name('sanitize_clone.py')),
+                                '--disk', str(temporary)], check=True, capture_output=True, timeout=300)
+                with temporary.open('rb') as stream: os.fsync(stream.fileno())
             self.require_stopped(identifier)
             temporary.replace(destination)
             self.sync_directory(destination.parent)
         finally: temporary.unlink(missing_ok=True)
         return {'id': identifier, 'snapshot_id': manifest['id'], 'status': 'stopped',
-                'snapshot_sha256': manifest['sha256'], 'guest_agent_refreshed': bool(self.config.get('guest_agent_refresh', False))}
+                'snapshot_sha256': manifest['sha256'], 'guest_agent_refreshed': bool(self.config.get('guest_agent_refresh', False)),
+                'fork_identity_reset': bool(payload.get('fork', False))}
 
     @staticmethod
     def sync_directory(path):
