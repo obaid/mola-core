@@ -15,6 +15,7 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 m.SNAPSHOT_CHUNK_BYTES = 256 * 1024
 m.SNAPSHOT_CHUNK_ENCODED_BYTES = 349528
+m.SNAPSHOT_WRITE_REQUEST_BYTES = m.SNAPSHOT_CHUNK_ENCODED_BYTES + 64 * 1024
 ID = '11111111-1111-4111-8111-111111111111'
 SNAPSHOT = '22222222-2222-4222-8222-222222222222'
 
@@ -97,6 +98,12 @@ with tempfile.TemporaryDirectory() as temp:
     assert target.delete_snapshot(ID, payload)['deleted'] is True
     assert (target.folder(ID) / 'root.ext4').read_bytes() == original
 print('native snapshots, restore, resumable transfer, checksums, identity and fencing passed')
+
+# The loopback runtime receives the same base64-encoded 8 MiB chunk accepted
+# by the public host API. Ordinary endpoints retain the much smaller cap.
+assert m.request_body_limit('/machines/' + ID + '/snapshot-write', 'POST') == m.SNAPSHOT_WRITE_REQUEST_BYTES
+assert m.request_body_limit('/machines/' + ID + '/restore', 'POST') == m.DEFAULT_REQUEST_BYTES
+assert m.request_body_limit('/machines/' + ID + '/snapshot-write', 'GET') == m.DEFAULT_REQUEST_BYTES
 
 # Health remains responsive while a long disk operation owns the mutation lock.
 with tempfile.TemporaryDirectory() as temp:
