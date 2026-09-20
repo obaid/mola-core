@@ -7,7 +7,7 @@ import { operatorToken, authorised, present, validateSpec, validateAction } from
 import { desktopPage, attachDesktop, mintTicket, serveNovnc } from './desktop.js';
 import { guestKey } from './keys.js';
 import { HostApi, hostToken } from './host-api.js';
-import { SNAPSHOT_CHUNK_ENCODED_BYTES } from './host-storage.js';
+import { SNAPSHOT_CHUNK_BODY_BYTES } from './host-storage.js';
 import { attachSsh } from './ssh.js';
 import { SnapshotTransfer } from './snapshot-transfer.js';
 
@@ -124,7 +124,7 @@ export async function createServer({ host, port, registry = new Registry(), runt
         if (!authorised(request, hostApi.token)) return json(response, 401, { message: 'Unauthenticated.' });
         const internalParts = parts.slice(2);
         const bodyLimit = internalParts[2] === 'snapshot-write'
-          ? SNAPSHOT_CHUNK_ENCODED_BYTES + 64 * 1024
+          ? SNAPSHOT_CHUNK_BODY_BYTES
           : 2 * 1024 * 1024;
         const result = await hostApi.handle(request, internalParts, method === 'POST' ? await readBody(request, bodyLimit) : {});
         return json(response, result.status, result.body);

@@ -5,6 +5,10 @@ import { revokeSsh } from './ssh.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const SNAPSHOT_CHUNK_BYTES = 8 * 1024 * 1024;
 export const SNAPSHOT_CHUNK_ENCODED_BYTES = Math.ceil(SNAPSHOT_CHUNK_BYTES / 3) * 4;
+// PHP's JSON encoder escapes `/` in base64 as `\/`. In the worst case the
+// wire representation is twice the validated base64 length; validation below
+// still caps the decoded payload at exactly SNAPSHOT_CHUNK_BYTES.
+export const SNAPSHOT_CHUNK_BODY_BYTES = (2 * SNAPSHOT_CHUNK_ENCODED_BYTES) + (64 * 1024);
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const stable = value => JSON.stringify(value, (_, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
