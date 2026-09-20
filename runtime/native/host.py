@@ -27,7 +27,9 @@ ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SNAPSHOT_CHUNK_BYTES = 8 * 1024 * 1024
 SNAPSHOT_CHUNK_ENCODED_BYTES = 11184812
 DEFAULT_REQUEST_BYTES = 1536 * 1024
-SNAPSHOT_WRITE_REQUEST_BYTES = SNAPSHOT_CHUNK_ENCODED_BYTES + 64 * 1024
+# PHP escapes `/` in base64 JSON as `\/`; reserve for the worst-case wire
+# representation, then enforce the decoded 8 MiB limit in write_snapshot_chunk.
+SNAPSHOT_WRITE_REQUEST_BYTES = (2 * SNAPSHOT_CHUNK_ENCODED_BYTES) + 64 * 1024
 
 
 def request_body_limit(path, method):

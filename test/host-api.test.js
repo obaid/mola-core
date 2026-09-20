@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Registry } from '../src/state.js';
 import { HostApi, hostToken, hostDescription } from '../src/host-api.js';
-import { SNAPSHOT_CHUNK_ENCODED_BYTES } from '../src/host-storage.js';
+import { SNAPSHOT_CHUNK_BODY_BYTES, SNAPSHOT_CHUNK_ENCODED_BYTES } from '../src/host-storage.js';
 
 const TOKEN = 'h'.repeat(40);
 function setup(t) {
@@ -33,6 +33,10 @@ function setup(t) {
 }
 const conflict = error => error.status === 409;
 const command = generation => ({ operation_id: randomUUID(), generation });
+
+test('snapshot wire limit covers PHP escaped base64 without raising decoded chunk capacity', () => {
+  assert.equal(SNAPSHOT_CHUNK_BODY_BYTES, (2 * SNAPSHOT_CHUNK_ENCODED_BYTES) + (64 * 1024));
+});
 
 test('create is stopped, caller ID survives restarts, exact retry returns saved result without credentials', async t => {
   const s = setup(t);
