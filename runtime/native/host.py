@@ -26,6 +26,16 @@ import time
 ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SNAPSHOT_CHUNK_BYTES = 8 * 1024 * 1024
 SNAPSHOT_CHUNK_ENCODED_BYTES = 11184812
+DEFAULT_REQUEST_BYTES = 1536 * 1024
+SNAPSHOT_WRITE_REQUEST_BYTES = SNAPSHOT_CHUNK_ENCODED_BYTES + 64 * 1024
+
+
+def request_body_limit(path, method):
+    """Keep ordinary loopback calls small while admitting one snapshot chunk."""
+    parts = path.strip('/').split('/')
+    if method == 'POST' and len(parts) == 3 and parts[0] == 'machines' and parts[2] == 'snapshot-write':
+        return SNAPSHOT_WRITE_REQUEST_BYTES
+    return DEFAULT_REQUEST_BYTES
 
 
 def write_json(path, value):
@@ -636,7 +646,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get('Origin'):
                 return self.reply(403, {'error': 'Browser origins are not accepted'})
             size = int(self.headers.get('Content-Length', '0'))
-            if size < 0 or size > 1572864: return self.reply(413, {'error': 'Request too large'})
+            if size < 0 or size > request_body_limit(self.path, self.command):
+                return self.reply(413, {'error': 'Request too large'})
             self.connection.settimeout(10)
             payload = json.loads(self.rfile.read(size)) if size else {}
             parts = self.path.strip('/').split('/')
