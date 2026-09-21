@@ -54,6 +54,26 @@ test('uploads snapshot parts directly, persists receipts and skips acknowledged 
   assert.deepEqual(attempts.sort(), [1, 2, 2]);
 });
 
+test('classifies permanent destination refusals separately from retryable outages', async t => {
+  const rejectWith = status => async (_url, options) => {
+    for await (const _chunk of Readable.from(options.body)) { /* consume the request before the fixture is removed */ }
+    return new Response('', { status });
+  };
+  const refused = fixture(t);
+  const denied = new SnapshotTransfer({ root: refused.root, fetcher: rejectWith(403) });
+  await assert.rejects(
+    denied.upload(refused.machineId, refused.snapshotId, refused.manifest, uploadGrant(refused.manifest)),
+    error => error.status === 424 && error.code === 'snapshot_destination_refused',
+  );
+
+  const unavailable = fixture(t);
+  const down = new SnapshotTransfer({ root: unavailable.root, fetcher: rejectWith(503) });
+  await assert.rejects(
+    down.upload(unavailable.machineId, unavailable.snapshotId, unavailable.manifest, uploadGrant(unavailable.manifest)),
+    error => error.status === 502 && error.code === 'snapshot_destination_unavailable',
+  );
+});
+
 test('downloads and verifies a direct archive before publishing it locally', async t => {
   const f = fixture(t);
   rmSync(join(f.folder, 'disk.gz'));
