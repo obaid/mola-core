@@ -258,8 +258,9 @@ export async function createServer({ host, port, registry = new Registry(), runt
     } catch (error) {
       const status = error.status && error.status >= 400 && error.status <= 599 ? error.status
         : (url.pathname.startsWith('/internal/v1/') && !(error instanceof SyntaxError) ? 502 : 400);
+      const publicCodes = ['machine_not_found', 'snapshot_destination_refused', 'snapshot_destination_unavailable'];
       return json(response, status, { message: error.message || 'Request failed.',
-        ...(error.code === 'machine_not_found' ? { code: error.code } : {}),
+        ...(publicCodes.includes(error.code) ? { code: error.code } : {}),
       });
     }
   });
