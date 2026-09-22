@@ -1,6 +1,6 @@
 {
   "name": "mola-core",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Run Omarchy computers on your own machine and drive them over a REST API.",
   "homepage": "https://mola.sh",
   "license": "FSL-1.1-ALv2",

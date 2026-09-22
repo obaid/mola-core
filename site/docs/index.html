@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mola docs</title>
-<meta name="description" content="How to install Mola, control a machine, drive it from an agent over MCP, and every endpoint in the API.">
+<meta name="description" content="Install Mola, control Omarchy computers over REST or MCP, and use persistent action sessions, screen streams, and secure port tunnels.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23111c18'/><rect x='3' y='4' width='10' height='8' fill='%239ece6a'/></svg>">
 <link rel="canonical" href="https://mola.sh/docs/">
 
@@ -14,18 +14,18 @@
 <meta property="og:site_name" content="Mola">
 <meta property="og:url" content="https://mola.sh/docs/">
 <meta property="og:title" content="Mola documentation">
-<meta property="og:description" content="Install Mola, control a machine, drive it from an agent over MCP, and read every endpoint in the API.">
+<meta property="og:description" content="Install Mola, control Omarchy computers over REST or MCP, and use persistent action sessions, screen streams, and secure port tunnels.">
 <meta property="og:image" content="https://mola.sh/og-docs.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The word MOLA in green pixel blocks on a dark ground, above the word "Documentation".">
+<meta property="og:image:alt" content="The word MOLA in green pixel blocks on a dark ground, above the word Documentation.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:creator" content="@obaid">
 <meta name="twitter:title" content="Mola documentation">
-<meta name="twitter:description" content="Install Mola, control a machine, drive it from an agent over MCP, and read every endpoint in the API.">
+<meta name="twitter:description" content="Install Mola, control Omarchy computers over REST or MCP, and use persistent action sessions, screen streams, and secure port tunnels.">
 <meta name="twitter:image" content="https://mola.sh/og-docs.png">
-<meta name="twitter:image:alt" content="The word MOLA in green pixel blocks on a dark ground, above the word "Documentation".">
+<meta name="twitter:image:alt" content="The word MOLA in green pixel blocks on a dark ground, above the word Documentation.">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap">
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -52,6 +52,12 @@
         </li>
         <li><a href="#drive">Control</a>
           <ol class="sub"><li><a href="#states">Machine states</a></li></ol>
+        </li>
+        <li><a href="#fast">Fast data plane</a>
+          <ol class="sub">
+            <li><a href="#binary">Binary and screen frames</a></li>
+            <li><a href="#tunnels">Port tunnels</a></li>
+          </ol>
         </li>
         <li><a href="#mcp">MCP</a></li>
         <li><a href="#api">API reference</a></li>
@@ -133,7 +139,7 @@ python3 bin/native-prepare --output ~/.mola</code></pre>
   </section>
 <section id="drive">
     <h2>Control</h2>
-    <p class="lede">Send one action per request to <code>POST /v1/machines/{id}/actions</code>. The engine accepts nine.</p>
+    <p class="lede">Send one action per request to <code>POST /v1/machines/{id}/actions</code>. The engine accepts nine. High-frequency clients can keep a persistent action session open instead.</p>
 
     <div class="scroll">
       <table>
@@ -199,6 +205,47 @@ curl -X POST $API/machines/$ID/actions -H <span class="a">"Authorization: Bearer
       <p>A delete that cannot tear a machine down returns 502 and keeps the machine registered, with the reason attached, so you can retry. Dropping the record instead would leave a virtual machine consuming memory that you could no longer name or stop.</p>
     </div>
   </section>
+<section id="fast">
+    <h2>Fast data plane</h2>
+    <p class="lede">Drive a ready computer through one ordered WebSocket connection instead of making an HTTP request for every action.</p>
+
+<pre><code>curl -s -X POST $API/machines/$ID/session \
+  -H <span class="a">"Authorization: Bearer $TOKEN"</span>
+
+<span class="d">{"data":{"session_url":"ws://127.0.0.1:4141/actions/socket?t=...",</span>
+<span class="d">         "expires_in":60}}</span></code></pre>
+
+    <p>Connect to <code>session_url</code> within 60 seconds. The ticket works once and the connection is bound to this computer and this boot. Stop, restart, restore, or delete the computer and the socket closes immediately. Obtain a new ticket after every boot.</p>
+
+    <p>Every request has a unique ID. Mola executes requests in arrival order and returns the same ID with the result:</p>
+
+<pre><code><span class="d">→</span> {"id":"1","op":"action","action":{"action":"exec","command":"uname -a"}}
+<span class="d">←</span> {"id":"1","ok":true,"result":{"exit_code":0,"stdout":"Linux ..."}}</code></pre>
+
+    <p>Up to 16 actions may be queued. The connection has a 60-second idle timeout and a 30-minute maximum lifetime. Send <code>{"id":"heartbeat-1","op":"ping"}</code> while an otherwise idle session is still needed. Never replay a side effect whose outcome was reported as unknown.</p>
+
+    <div class="box">
+      <span class="lbl">Compatibility stays simple</span>
+      <p>The REST action endpoint and all MCP tools remain supported. Use a session when latency or action volume matters; use REST or MCP when one call at a time is clearer.</p>
+    </div>
+
+    <h3 id="binary">Binary files and screen frames</h3>
+    <p>Set <code>"binary":true</code> on <code>read_file</code> or <code>screenshot</code>. Mola sends JSON metadata containing the exact byte length, MIME type, and SHA-256 digest, followed by one binary frame. File reads and incoming binary writes are limited to 1 MiB. Screenshots may be larger, so allocate from the reported length.</p>
+
+<pre><code>{"id":"screen-1","op":"screen.subscribe","max_fps":5}</code></pre>
+
+    <p>A screen subscription sends one full frame and then only changed frames, up to 10 FPS. Slow clients receive coalesced updates instead of an unbounded queue. Use <code>screen.resync</code> for a fresh full frame and <code>screen.unsubscribe</code> when finished. Frames are transport only: Mola does not inspect or interpret the screen.</p>
+
+    <h3 id="tunnels">Machine-scoped port tunnels</h3>
+<pre><code>curl -s -X POST $API/machines/$ID/tunnels \
+  -H <span class="a">"Authorization: Bearer $TOKEN"</span> \
+  -H <span class="a">'content-type: application/json'</span> \
+  -d <span class="a">'{"port":9222}'</span></code></pre>
+
+    <p>The response contains a single-use WebSocket URL that carries binary data to that port on the selected computer's loopback interface. This lets an external tool reach a native protocol such as Chromium CDP without exposing the port publicly. The caller chooses a permitted port, never a host; privileged and Mola-managed ports are denied.</p>
+
+    <p>Tickets expire after 60 seconds and tunnels close on lifecycle changes, after 60 seconds idle, after 30 minutes, or at 32 MiB transferred. A computer may have four tunnels open. See the <a href="https://github.com/obaid/mola-core/blob/main/docs/action-session.md">complete protocol contract</a> and <a href="https://github.com/obaid/mola-core/tree/main/examples">runnable examples</a>.</p>
+  </section>
 <section id="mcp">
     <h2>MCP</h2>
     <p class="lede">The engine ships an MCP server, so Claude Code, Claude Desktop, Cursor and anything else that speaks MCP can drive a machine. You write config, not code.</p>
@@ -255,6 +302,8 @@ curl -X POST $API/machines/$ID/actions -H <span class="a">"Authorization: Bearer
           <tr><td class="k">POST /v1/machines/{id}/start</td><td>start a stopped one</td></tr>
           <tr><td class="k">POST /v1/machines/{id}/stop</td><td>shut down, <code>{"force": true}</code> cuts power</td></tr>
           <tr><td class="k">POST /v1/machines/{id}/actions</td><td>do something inside it</td></tr>
+          <tr><td class="k">POST /v1/machines/{id}/session</td><td>one ordered WebSocket for many actions</td></tr>
+          <tr><td class="k">POST /v1/machines/{id}/tunnels</td><td>reach one allowed guest loopback port</td></tr>
           <tr><td class="k">POST /v1/machines/{id}/desktop</td><td>a browser URL for the screen</td></tr>
           <tr><td class="k">DELETE /v1/machines/{id}</td><td>destroy it and its disk</td></tr>
         </tbody>
