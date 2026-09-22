@@ -194,8 +194,11 @@ export class HostApi {
         // resurrected by a new command with that same generation.
         const priorIntent = Object.values(record.cloud.operations).some(operation => {
           const payload = JSON.parse(operation.fingerprint);
+          // A fork restore and deletion of its one-use import artifact are
+          // preparation for this generation's first boot, not earlier boots.
           return payload.generation === body.generation && operation.verb !== 'create'
             && !(operation.verb === 'restore' && payload.fork === true)
+            && operation.verb !== 'snapshot-delete'
             && !Object.hasOwn(payload, 'image_ref');
         });
         if (priorIntent) fail(409, 'A new start requires a new boot generation.');
