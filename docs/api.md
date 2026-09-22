@@ -64,9 +64,9 @@ Creates a computer and starts it. Every field is optional.
 | Field | Default | Range |
 |---|---|---|
 | `name` | generated | up to 64 characters |
-| `vcpus` | 4 | 1 to 8 |
-| `memory_mb` | 4096 | 1024 to 16384 |
-| `disk_gb` | 40 | 16 to 1024 |
+| `vcpus` | host default, normally 4 | 1 to 8 |
+| `memory_mb` | host default, normally 4096 | 1024 to 16384 |
+| `disk_gb` | host default, normally 40 | 16 to 1024 |
 
 Returns 201 and the machine, in `booting`. The disk is a copy-on-write clone of
 the base image, which is why creating one takes about a second regardless of
@@ -229,5 +229,8 @@ proving it holds its enrolment key, rather than by repeating the token.
 | `MOLA_QEMU` | a specific QEMU binary to use |
 | `MOLA_MAX_RUNNING` | how many machines may run at once, default 2 |
 | `MOLA_MAX_MEMORY_MB` | total memory machines may reserve, default 8192 |
+| `MOLA_DEFAULT_VCPUS` | vCPU count when a create request omits `vcpus`, default 4 |
+| `MOLA_DEFAULT_MEMORY_MB` | memory when a create request omits `memory_mb`, default 4096 |
+| `MOLA_DEFAULT_DISK_GB` | disk size when a create request omits `disk_gb`, default 40 |
 | `MOLA_GPU` | override the QEMU display device |
 | `MOLA_DISPLAY` | override the QEMU display backend |

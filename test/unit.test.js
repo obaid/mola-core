@@ -36,6 +36,42 @@ test('specs are bounded', () => {
   assert.throws(() => validateSpec({ disk_gb: 4 }), /disk_gb/);
 });
 
+test('machine defaults can be sized for a constrained host', () => {
+  const before = {
+    vcpus: process.env.MOLA_DEFAULT_VCPUS,
+    memory: process.env.MOLA_DEFAULT_MEMORY_MB,
+    disk: process.env.MOLA_DEFAULT_DISK_GB,
+  };
+  process.env.MOLA_DEFAULT_VCPUS = '1';
+  process.env.MOLA_DEFAULT_MEMORY_MB = '2048';
+  process.env.MOLA_DEFAULT_DISK_GB = '20';
+  try {
+    assert.deepEqual(validateSpec({ name: 'lean' }), {
+      name: 'lean',
+      vcpus: 1,
+      memory_mb: 2048,
+      disk_gb: 20,
+    });
+    assert.deepEqual(validateSpec({ name: 'explicit', vcpus: 2, memory_mb: 3072, disk_gb: 24 }), {
+      name: 'explicit',
+      vcpus: 2,
+      memory_mb: 3072,
+      disk_gb: 24,
+    });
+    process.env.MOLA_DEFAULT_VCPUS = 'many';
+    assert.throws(() => validateSpec({}), /MOLA_DEFAULT_VCPUS must be an integer/);
+  } finally {
+    for (const [key, value] of [
+      ['MOLA_DEFAULT_VCPUS', before.vcpus],
+      ['MOLA_DEFAULT_MEMORY_MB', before.memory],
+      ['MOLA_DEFAULT_DISK_GB', before.disk],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test('only known actions are accepted', () => {
   assert.throws(() => validateAction({ action: 'rm -rf' }), /action must be one of/);
   assert.throws(() => validateAction({ action: 'exec' }), /command/);

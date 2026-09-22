@@ -3,7 +3,7 @@ import { Registry } from './state.js';
 import { Runtime } from './runtime.js';
 import { GuestService } from './guest.js';
 import { runAction } from './automation.js';
-import { operatorToken, authorised, present, validateSpec, validateAction } from './api.js';
+import { operatorToken, authorised, present, defaultResources, validateSpec, validateAction } from './api.js';
 import { desktopPage, attachDesktop, mintTicket, serveNovnc } from './desktop.js';
 import { guestKey } from './keys.js';
 import { HostApi, hostToken } from './host-api.js';
@@ -140,6 +140,7 @@ export async function createServer({ host, port, registry = new Registry(), runt
           service: 'mola-engine',
           version: '0.1.0',
           host: { platform: host.platform, arch: host.arch, accelerator: host.accelerator },
+          machine_defaults: defaultResources(),
           endpoints: {
             'GET /v1/machines': 'list machines',
             'POST /v1/machines': 'create a new Omarchy machine',

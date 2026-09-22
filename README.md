@@ -121,6 +121,18 @@ endpoints and reports what the host can do.
 | `POST /v1/machines/{id}/desktop` | get a browser URL for the screen |
 | `DELETE /v1/machines/{id}` | destroy it and its disk |
 
+Choose the resources for each computer when you create it:
+
+```json
+{ "name": "lean", "vcpus": 1, "memory_mb": 2048, "disk_gb": 20 }
+```
+
+The supported ranges are 1–8 vCPU, 1024–16384 MB of memory and 16–1024 GB of
+disk. A host can also change the defaults for requests that omit these fields
+with `MOLA_DEFAULT_VCPUS`, `MOLA_DEFAULT_MEMORY_MB` and
+`MOLA_DEFAULT_DISK_GB`. `GET /v1` reports the active values in
+`machine_defaults`.
+
 Nine actions run inside a machine: `exec`, `read_file`, `write_file`,
 `screenshot`, `click`, `move`, `scroll`, `type`, and `key`.
 
