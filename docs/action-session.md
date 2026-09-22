@@ -24,9 +24,11 @@ credential or a side-effecting action whose outcome was reported as unknown.
 
 For `read_file` or `screenshot`, set `"binary":true`. The response is JSON
 metadata followed by one binary frame. For a binary `write_file`, send JSON with
-`binary_bytes`, then one frame of exactly that length. Payloads are capped at 1
-MiB and cannot be interleaved. Metadata includes the exact length and SHA-256
-digest. A missing or wrong-length frame fails its request while leaving the
+`binary_bytes`, then one frame of exactly that length. File reads and incoming
+binary writes are capped at 1 MiB and writes cannot be interleaved. Screenshots
+may be larger; always allocate from the exact `binary.bytes` metadata rather
+than assuming the file limit applies. Metadata also includes a SHA-256 digest.
+A missing or wrong-length write frame fails its request while leaving the
 session usable.
 
 Subscribe to changed screen frames with:

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.1 — 2026-09-22
+
+- Document persistent action sessions, binary transfers, changed-screen
+  subscriptions, and machine-scoped port tunnels on the public documentation
+  site and in `llms.txt`.
+- Clarify that the 1 MiB action-session limit applies to file reads and incoming
+  binary writes. Screenshot and screen-subscription frames report their own
+  exact byte length and may be larger.
+
 ## 1.4.0 — 2026-09-21
 
 - Keep a bounded pool of automation workers, OpenSSH control connections and

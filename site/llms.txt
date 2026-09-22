@@ -1,6 +1,6 @@
 # Mola
 
-> Throwaway Linux computers for AI agents. Each machine runs Omarchy, the Arch Linux desktop, in its own virtual machine on the user's own hardware. About one second to create, about seven to become usable. Drive it over a REST API, over MCP, or from the bundled chat app.
+> Persistent Linux computers for AI agents. Each machine runs Omarchy, the Arch Linux desktop, in its own virtual machine on the user's own hardware. About one second to create, about seven to become usable. Drive it over REST, MCP, or a persistent low-latency action session.
 
 This file is written for an agent deciding whether to use Mola and then using it.
 Every number below is exact. Docs: https://mola.sh/docs/ · Source: https://github.com/obaid/mola-core
@@ -99,13 +99,40 @@ curl -s -X DELETE $API/machines/$ID -H "Authorization: Bearer $TOKEN"
 Endpoints: `GET /v1` · `GET /health` · `POST /v1/machines` · `GET /v1/machines` ·
 `GET /v1/machines/{id}` · `POST /v1/machines/{id}/start` ·
 `POST /v1/machines/{id}/stop` · `POST /v1/machines/{id}/actions` ·
+`POST /v1/machines/{id}/session` · `POST /v1/machines/{id}/tunnels` ·
 `POST /v1/machines/{id}/desktop` · `DELETE /v1/machines/{id}`
 
 Nine actions, all to `POST /v1/machines/{id}/actions`, one per request:
 `exec`, `read_file`, `write_file`, `screenshot`, `click`, `move`, `scroll`,
 `type`, `key`.
 
-### Option 3 — the chat app
+### Option 3 — persistent action session
+
+For high-frequency work, mint a single-use WebSocket ticket:
+
+```sh
+curl -s -X POST $API/machines/$ID/session \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Connect to `data.session_url` within 60 seconds. Send uniquely identified JSON
+requests such as `{"id":"1","op":"action","action":{"action":"exec","command":"uname -a"}}`.
+Mola executes them in arrival order. The socket supports binary file and
+screenshot responses plus changed-screen subscriptions up to 10 FPS. A stop,
+restart, restore, or delete revokes the connection; obtain a new ticket after
+every boot.
+
+File reads and incoming binary writes are limited to 1 MiB. Screenshot frames
+may be larger and announce their exact byte length and SHA-256 digest first.
+
+### Option 4 — machine-scoped port tunnel
+
+`POST /v1/machines/{id}/tunnels` with `{"port":9222}` returns a single-use
+WebSocket URL carrying binary data to that port on the selected computer's
+loopback interface. Use it for native protocols such as Chromium CDP. Callers
+cannot select a host, and privileged or Mola-managed ports are refused.
+
+### Option 5 — the chat app
 
 `npx mola-agent` opens a local chat UI with the desktop beside the conversation.
 For humans who want to watch, not for you to call.
@@ -179,6 +206,7 @@ client; or Linux x86_64 with `qemu-system-x86_64` and a usable `/dev/kvm`.
 
 - [Getting started](https://mola.sh/docs/#start)
 - [Control a machine](https://mola.sh/docs/#drive)
+- [Fast data plane](https://mola.sh/docs/#fast)
 - [MCP](https://mola.sh/docs/#mcp)
 - [API reference](https://mola.sh/docs/#api)
 - [Machine states](https://mola.sh/docs/#states)
