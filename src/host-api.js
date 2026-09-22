@@ -5,6 +5,7 @@ import { authorised, validateSpec, validateAction } from './api.js';
 import { revokeDesktop } from './desktop.js';
 import { handleSsh, revokeSsh } from './ssh.js';
 import { storageOperation, STORAGE_VERBS } from './host-storage.js';
+import { revokeDataPlane } from './data-plane.js';
 
 const fail = (status, message, code) => { throw Object.assign(new Error(message), { status, code }); };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -54,8 +55,8 @@ export function hostDescription(record, runtime, settledOperationKey = null) {
  * Tombstones and results are retained to fence delayed messages after deletion.
  */
 export class HostApi {
-  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', desktop, action, snapshotTransfer = null }) {
-    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, snapshotTransfer });
+  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', desktop, action, session, tunnel, snapshotTransfer = null }) {
+    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, session, tunnel, snapshotTransfer });
     this.locks = new Map();
   }
 
@@ -108,7 +109,7 @@ export class HostApi {
     if (!UUID.test(id || '')) fail(400, 'id must be a UUID.');
     if (parts.length === 3 && verb === 'ssh') return this.locked(id, () => handleSsh(this, id, body));
     if (parts.length === 3 && STORAGE_VERBS.includes(verb)) return this.locked(id, () => storageOperation(this, id, verb, body));
-    if (parts.length === 3 && ['desktop', 'actions'].includes(verb)) {
+    if (parts.length === 3 && ['desktop', 'actions', 'session', 'tunnels'].includes(verb)) {
       return this.locked(id, async () => {
         const record = this.record(id);
         const described = await this.runtime.describe(id);
@@ -118,9 +119,20 @@ export class HostApi {
           const binding = { generation: record.cloud.generation, boot_id: record.boot_id };
           return { status: 201, body: { data: this.desktop(id, described, binding) } };
         }
+        if (verb === 'session' || verb === 'tunnels') {
+          if (!hostDescription(record, described).ready) fail(409, 'Machine is not ready.');
+          const binding = { generation: record.cloud.generation, boot_id: record.boot_id };
+          if (verb === 'session') return { status: 201, body: { data: this.session(id, described, binding) } };
+          return { status: 201, body: { data: this.tunnel(id, described, body.port, binding) } };
+        }
         let action;
         try { action = validateAction(body); } catch (error) { fail(400, error.message); }
-        return { status: 200, body: { data: await this.action({ id: record.id, ...described }, action) } };
+        return { status: 200, body: { data: await this.action({
+          id: record.id,
+          boot_id: record.boot_id,
+          runtime_generation: record.runtime_generation,
+          ...described,
+        }, action) } };
       });
     }
     if (!(parts.length === 1 || parts.length === 3) || !['create', 'start', 'shutdown', 'force-stop', 'destroy'].includes(verb)) fail(404, 'Not found.');
@@ -225,7 +237,7 @@ export class HostApi {
       this.registry.flush();
     }
     const operation = record.cloud.operations[key];
-    if (verb !== 'create') { revokeDesktop(id); revokeSsh(id); }
+    if (verb !== 'create') { revokeDesktop(id); revokeSsh(id); revokeDataPlane(id); }
     if (verb === 'create') {
       if (record.cloud.image_ref !== this.imageRef) fail(409, 'Pending create requires its original installed image.');
       await this.runtime.create({ computer_id: id, ...record.cloud.create_spec,
