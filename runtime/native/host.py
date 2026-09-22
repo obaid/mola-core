@@ -395,8 +395,11 @@ class Runner:
     def destroy(self, identifier, delete_disk):
         folder = self.folder(identifier)
         retained = self.root / 'retained' / (identifier + '.ext4')
+        snapshots = self.root / 'snapshots' / identifier
         if not folder.exists():
-            if delete_disk: retained.unlink(missing_ok=True)
+            if delete_disk:
+                retained.unlink(missing_ok=True)
+                if snapshots.exists(): shutil.rmtree(snapshots)
             return
         data = self.metadata(identifier)
         if self.status(data) != 'stopped': raise ValueError('Stop the computer before deleting it')
@@ -410,6 +413,7 @@ class Runner:
                 write_json(folder / 'machine.json', data)
                 (folder / 'root.ext4').rename(retained)
         shutil.rmtree(folder)
+        if delete_disk and snapshots.exists(): shutil.rmtree(snapshots)
 
     def reseed(self, identifier, payload):
         self.require_stopped(identifier)
