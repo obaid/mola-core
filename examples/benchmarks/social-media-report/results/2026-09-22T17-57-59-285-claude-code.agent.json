@@ -1,0 +1,10 @@
+{
+  "agent_version": "2.1.280 (Claude Code)",
+  "model": "sonnet",
+  "input_tokens": 48,
+  "output_tokens": 6053,
+  "cache_creation_input_tokens": 72405,
+  "cache_read_input_tokens": 1212610,
+  "cost_usd": 2.008679,
+  "model_calls": 26
+}

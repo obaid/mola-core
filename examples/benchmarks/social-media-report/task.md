@@ -1,5 +1,14 @@
-Research the supplied social-media fixture for Acme Robotics. Write
-`~/benchmark/social-report.md` with major themes, notable discussions, recurring
-praise and complaints, visible engagement signals, competitive mentions, five
-actionable observations, and a source URL for every substantive finding. Use
-only the supplied fixture. Do not invent unavailable metrics.
+Research {{BRAND}} for {{WINDOW}} in {{MODE}} mode. Use these sources:
+
+{{SOURCES}}
+
+Work inside the assigned Mola computer. Fetch every source from that computer,
+inspect its contents, and write `~/benchmark/social-report.md` with these H2
+sections: Major themes, Notable discussions, Recurring praise, Recurring
+complaints, Visible engagement, Competitive mentions, and Actionable
+observations. Include exactly five distinct actionable observations.
+
+Put a full source URL on the same bullet or paragraph as every substantive
+finding. Do not invent metrics or claims. In fixture mode, use only the supplied
+URLs. In live mode, add a final Source access log listing every reached,
+inaccessible, login-gated, or failed URL.

@@ -1,14 +1,25 @@
-import WebSocket from 'ws';
-const api=(process.env.MOLA_API||'http://127.0.0.1:4141/v1').replace(/\/$/,'');
-const token=process.env.MOLA_TOKEN, machine=process.env.MOLA_MACHINE;
-if(!token||!machine) throw new Error('Set MOLA_TOKEN and MOLA_MACHINE.');
-const response=await fetch(`${api}/machines/${encodeURIComponent(machine)}/session`,{method:'POST',headers:{authorization:`Bearer ${token}`}});
-const grant=(await response.json()).data;
-const ws=new WebSocket(grant.session_url);
-await new Promise((resolve,reject)=>{ws.once('open',resolve);ws.once('error',reject)});
-const pending=new Map();
-ws.on('message',(data,binary)=>{if(binary)return;const message=JSON.parse(data);pending.get(message.id)?.(message);});
-const action=(id,body)=>new Promise(resolve=>{pending.set(id,resolve);ws.send(JSON.stringify({id,op:'action',action:body}));});
-for(let i=0;i<100;i+=1){const result=await action(String(i),{action:'exec',command:'true'});if(!result.ok)throw new Error(result.error.message);}
-console.log('100 actions completed over one session');
-ws.close();
+import { MolaClient, MolaApiError } from '../../lib/mola-client.mjs';
+
+const client = new MolaClient();
+const machine = process.env.MOLA_MACHINE;
+if (!machine) throw new Error('Set MOLA_MACHINE to a ready machine id.');
+
+const session = await client.actionSession(machine);
+console.log(`Protocol ${session.capabilities.protocol}; up to ${session.capabilities.max_in_flight} queued actions.`);
+try {
+  const started = performance.now();
+  for (let index = 0; index < 100; index += 1) await session.action({ action: 'exec', command: 'true' });
+  const payload = Buffer.from('binary round trip\n');
+  await session.action({ action: 'write_file', path: '~/mola-session.bin' }, { data: payload });
+  const read = await session.action({ action: 'read_file', path: '~/mola-session.bin' }, { binary: true });
+  if (!read.data.equals(payload)) throw new Error('Binary round trip did not match.');
+  const screenshot = await session.action({ action: 'screenshot' }, { binary: true });
+  console.log({ actions: 103, elapsed_ms: Math.round(performance.now() - started), file_bytes: read.data.length, screenshot_bytes: screenshot.data.length });
+} catch (error) {
+  if (error instanceof MolaApiError && ['stale_session', 'session_closed'].includes(error.code)) {
+    console.error(`${error.message}\nRequest a fresh session with client.actionSession(machine). Never replay an action whose outcome is unknown.`);
+  }
+  throw error;
+} finally {
+  session.close();
+}
