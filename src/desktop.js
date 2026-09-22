@@ -85,7 +85,7 @@ export function attachDesktop(server) {
 
   server.on('upgrade', async (request, socket, head) => {
     const url = new URL(request.url, 'http://localhost');
-    if (url.pathname !== '/desktop/socket') return socket.destroy();
+    if (url.pathname !== '/desktop/socket') return;
 
     const target = redeem(url.searchParams.get('t'));
     if (!target) {

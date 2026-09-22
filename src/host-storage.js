@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { revokeDesktop } from './desktop.js';
 import { revokeSsh } from './ssh.js';
+import { revokeDataPlane } from './data-plane.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const SNAPSHOT_CHUNK_BYTES = 8 * 1024 * 1024;
@@ -78,7 +79,7 @@ export async function storageOperation(api, id, verb, body) {
     }
     api.registry.flush();
   }
-  if (['restore', 'fence'].includes(verb)) { revokeDesktop(id); revokeSsh(id); }
+  if (['restore', 'fence'].includes(verb)) { revokeDesktop(id); revokeSsh(id); revokeDataPlane(id); }
   const data = await api.runtime.storageOperation(id, verb, body);
   if (verb === 'restore') await api.runtime.reseed(id, {
     registration_token: record.registration_token, authorized_keys: record.authorized_keys, name: record.name,

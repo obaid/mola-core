@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.4.0 — 2026-09-21
+
+- Keep a bounded pool of automation workers, OpenSSH control connections and
+  boot-scoped display connections warm instead of recreating them per action.
+- Add single-use, lifecycle-fenced persistent action sessions with ordered
+  requests, binary file and screenshot frames, changed-screen subscriptions,
+  explicit backpressure, idle limits and latency metrics.
+- Add machine-scoped binary port tunnels for guest loopback services such as
+  Chromium CDP, with restricted ports, connection, byte and lifetime limits.
+- Add REST-versus-session benchmarks, Node and Python action-session examples,
+  a runnable Playwright CDP bridge, and external-agent integration guides.
+
+The REST API remains compatible. Hosted control planes can opt into the new
+private session and tunnel grants; existing desktop, SSH, snapshot and lifecycle
+contracts are unchanged.
+
 ## 1.3.0 — 2026-09-15
 
 - Add resumable direct R2 snapshot export and import using short-lived signed

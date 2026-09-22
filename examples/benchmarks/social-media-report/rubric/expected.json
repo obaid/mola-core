@@ -1,0 +1,5 @@
+{
+  "required_sections": ["themes", "notable", "praise", "complaints", "engagement", "competitive", "actionable"],
+  "facts": ["Rover Mini", "1,240", "quiet motors", "Linux SDK", "replacement parts", "Wi-Fi", "BetaBot Pocket", "battery life"],
+  "sources": ["launch.html", "support.html", "market.html"]
+}

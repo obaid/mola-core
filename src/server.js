@@ -2,7 +2,7 @@ import http from 'node:http';
 import { Registry } from './state.js';
 import { Runtime } from './runtime.js';
 import { GuestService } from './guest.js';
-import { runAction } from './automation.js';
+import { closeAutomation, runAction } from './automation.js';
 import { operatorToken, authorised, present, defaultResources, validateSpec, validateAction } from './api.js';
 import { desktopPage, attachDesktop, mintTicket, serveNovnc } from './desktop.js';
 import { guestKey } from './keys.js';
@@ -10,6 +10,7 @@ import { HostApi, hostToken } from './host-api.js';
 import { SNAPSHOT_CHUNK_BODY_BYTES } from './host-storage.js';
 import { attachSsh } from './ssh.js';
 import { SnapshotTransfer } from './snapshot-transfer.js';
+import { attachDataPlane, getDataPlaneMetrics, mintActionTicket, mintTunnelTicket, revokeDataPlane } from './data-plane.js';
 
 const json = (response, status, body) => {
   const payload = JSON.stringify(body, null, 2);
@@ -32,6 +33,14 @@ async function readBody(request, limit = 2 * 1024 * 1024) {
 export async function createServer({ host, port, registry = new Registry(), runtime = new Runtime(host), keys = guestKey() }) {
   const guests = new GuestService(registry);
   const token = operatorToken();
+  const validateLocalSession = async (id, binding) => {
+    const record = registry.get(id);
+    if (!record || record.cloud?.deleted || record.boot_id !== binding.boot_id
+      || record.runtime_generation !== binding.generation) return false;
+    const described = await runtime.describe(id);
+    return record.boot_id === binding.boot_id && record.runtime_generation === binding.generation
+      && present(record, described).status === 'ready';
+  };
   const hostApi = new HostApi({
     registry, runtime, publicKey: keys.publicKey, token: hostToken(token),
     desktop: (id, described, binding) => ({
@@ -40,8 +49,25 @@ export async function createServer({ host, port, registry = new Registry(), runt
       })}`, expires_in: 60,
     }),
     action: runAction,
+    session: (id, described, binding) => ({
+      session_url: `ws://127.0.0.1:${port}/actions/socket?t=${mintActionTicket(id, {
+        id, boot_id: binding.boot_id, runtime_generation: binding.generation, ...described,
+      }, { ...binding, validate: captured => recordIsCloud(id)
+        ? hostApi.validateDesktop(id, captured)
+        : validateLocalSession(id, captured) })}`,
+      expires_in: 60,
+    }),
+    tunnel: (id, described, guestPort, binding) => ({
+      tunnel_url: `ws://127.0.0.1:${port}/tunnel/socket?t=${mintTunnelTicket(id, {
+        id, boot_id: binding.boot_id, ...described,
+      }, guestPort, { ...binding, validate: captured => recordIsCloud(id)
+        ? hostApi.validateDesktop(id, captured)
+        : validateLocalSession(id, captured) })}`,
+      expires_in: 60,
+    }),
     snapshotTransfer: new SnapshotTransfer(),
   });
+  function recordIsCloud(id) { return Boolean(registry.get(id)?.cloud); }
 
   await runtime.start();
 
@@ -143,15 +169,22 @@ export async function createServer({ host, port, registry = new Registry(), runt
           machine_defaults: defaultResources(),
           endpoints: {
             'GET /v1/machines': 'list machines',
+            'GET /v1/metrics': 'bounded transport counters and latency histograms (no action payloads)',
             'POST /v1/machines': 'create a new Omarchy machine',
             'GET /v1/machines/{id}': 'describe one machine',
             'POST /v1/machines/{id}/start': 'start it',
             'POST /v1/machines/{id}/stop': 'ask it to shut down (force=true to cut power)',
             'POST /v1/machines/{id}/actions': 'exec, read_file, write_file, screenshot, click, move, scroll, type, key',
+            'POST /v1/machines/{id}/session': 'mint a short-lived persistent action WebSocket',
+            'POST /v1/machines/{id}/tunnels': 'mint a short-lived WebSocket tunnel to an allowed guest port',
             'POST /v1/machines/{id}/desktop': 'mint a browser URL for the desktop',
             'DELETE /v1/machines/{id}': 'destroy it and its disk',
           },
         });
+      }
+
+      if (method === 'GET' && parts.length === 2 && parts[1] === 'metrics') {
+        return json(response, 200, { data: getDataPlaneMetrics() });
       }
 
       if (parts[1] !== 'machines') return json(response, 404, { message: 'Not found.' });
@@ -205,6 +238,7 @@ export async function createServer({ host, port, registry = new Registry(), runt
       }
 
       if (method === 'DELETE' && parts.length === 3) {
+        revokeDataPlane(record.id);
         // A delete that could not tear the machine down must stay visible.
         // Swallowing the failure and removing the row leaves a running VM with
         // no name — the operator's only clue would be the memory it consumes.
@@ -226,11 +260,13 @@ export async function createServer({ host, port, registry = new Registry(), runt
       if (method === 'POST' && parts.length === 4) {
         const verb = parts[3];
         if (verb === 'start') {
+          revokeDataPlane(record.id);
           await runtime.startMachine(record.id);
           registry.update(record.id, { desired_state: 'running' });
           return json(response, 200, { data: present(registry.get(record.id), await describe(record.id)) });
         }
         if (verb === 'stop') {
+          revokeDataPlane(record.id);
           const body = await readBody(request);
           registry.update(record.id, { desired_state: 'stopped' });
           if (body?.force) await runtime.forceStop(record.id);
@@ -245,11 +281,24 @@ export async function createServer({ host, port, registry = new Registry(), runt
             data: { desktop_url: `http://127.0.0.1:${port}/desktop#t=${ticket}`, expires_in: 60 },
           });
         }
+        if (verb === 'session') {
+          const described = await describe(record.id);
+          if (!described || present(record, described).status !== 'ready') return json(response, 409, { message: 'Machine is not ready.' });
+          const binding = { boot_id: record.boot_id, generation: record.runtime_generation };
+          return json(response, 201, { data: hostApi.session(record.id, described, binding) });
+        }
+        if (verb === 'tunnels') {
+          const body = await readBody(request);
+          const described = await describe(record.id);
+          if (!described || present(record, described).status !== 'ready') return json(response, 409, { message: 'Machine is not ready.' });
+          const binding = { boot_id: record.boot_id, generation: record.runtime_generation };
+          return json(response, 201, { data: hostApi.tunnel(record.id, described, body.port, binding) });
+        }
         if (verb === 'actions') {
           const body = validateAction(await readBody(request));
           const described = await describe(record.id);
           if (!described) return json(response, 409, { message: 'Machine is not running.' });
-          const result = await runAction({ id: record.id, ...described }, body);
+          const result = await runAction({ id: record.id, boot_id: record.boot_id, runtime_generation: record.runtime_generation, ...described }, body);
           return json(response, 200, { data: result });
         }
         return json(response, 404, { message: 'Unknown action.' });
@@ -268,6 +317,8 @@ export async function createServer({ host, port, registry = new Registry(), runt
 
   attachDesktop(server);
   attachSsh(server);
+  attachDataPlane(server, { runAction });
+  server.once('close', closeAutomation);
 
   return { server, runtime, registry, token };
 }

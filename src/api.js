@@ -86,7 +86,17 @@ export function validateAction(body) {
   if (!ACTIONS.has(action)) throw new Error(`action must be one of: ${[...ACTIONS].join(', ')}`);
   if (action === 'exec' && typeof body.command !== 'string') throw new Error('exec requires a command string.');
   if ((action === 'read_file' || action === 'write_file') && typeof body.path !== 'string') throw new Error('path is required.');
-  if (action === 'write_file' && typeof body.content !== 'string') throw new Error('content is required.');
+  if (action === 'write_file') {
+    const text = typeof body.content === 'string';
+    const binary = typeof body.content_base64 === 'string';
+    if (text === binary) throw new Error('write_file requires exactly one of content or content_base64.');
+    if (binary) {
+      const decoded = Buffer.from(body.content_base64, 'base64');
+      if (decoded.length > 1024 * 1024 || decoded.toString('base64').replace(/=+$/, '') !== body.content_base64.replace(/=+$/, '')) {
+        throw new Error('content_base64 must be valid base64 no larger than 1 MiB.');
+      }
+    }
+  }
   if (action === 'type' && typeof body.text !== 'string') throw new Error('text is required.');
   if (action === 'key' && typeof body.key !== 'string') throw new Error('key is required.');
   return body;

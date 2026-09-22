@@ -143,6 +143,24 @@ The ticket is single use and lives sixty seconds. It travels in the URL
 fragment, which browsers do not send to servers, so it stays out of access logs
 and `Referer` headers. The page strips it from history once it connects.
 
+### `POST /v1/machines/{id}/session`
+
+Returns a single-use WebSocket URL for many ordered actions. The computer must
+be ready. The ticket expires after 60 seconds and the live connection is bound
+to the current boot. See [Low-latency action sessions](action-session.md) for
+the message, binary frame, screen subscription and error contracts.
+
+### `POST /v1/machines/{id}/tunnels`
+
+```json
+{ "port": 9222 }
+```
+
+Returns a single-use WebSocket tunnel to that port on the selected computer's
+loopback interface. Callers cannot provide a host. Privileged and Mola-managed
+ports are denied. Operational limits and the threat model are documented with
+the [action-session protocol](action-session.md#port-tunnels).
+
 ## Actions
 
 All nine go to `POST /v1/machines/{id}/actions`, one per request. The machine
