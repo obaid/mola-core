@@ -396,7 +396,7 @@ test('snapshot intent survives lost responses and restore rotates identity exact
   assert.equal(restores, 1);
 });
 
-test('fork restore forwards identity reset intent and permits the new computer first boot', async t => {
+test('fork restore cleanup permits the new computer first boot', async t => {
   const s = setup(t); const id = s.create.id;
   await s.send('machines', s.create);
   const calls = [];
@@ -410,6 +410,8 @@ test('fork restore forwards identity reset intent and permits the new computer f
   assert.equal(response.body.data.fork_identity_reset, true);
   assert.equal(calls[0][0], 'restore');
   assert.equal(calls[0][1].fork, true);
+  await s.send(`machines/${id}/snapshot-delete`, { ...command(1), snapshot_id: restore.snapshot_id });
+  assert.equal(calls[1][0], 'snapshot-delete');
   assert.equal((await s.send(`machines/${id}/start`, command(1))).body.data.status, 'running');
 });
 
