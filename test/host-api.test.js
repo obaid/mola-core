@@ -291,6 +291,36 @@ test('private desktop tickets require current readiness and remain bound to thei
   assert.equal(await s.api.validateDesktop(id, binding), false);
 });
 
+test('private Cua calls require live driver evidence and the current boot', async t => {
+  const s = setup(t); const id = s.create.id;
+  await s.send('machines', s.create);
+  await s.send(`machines/${id}/start`, command(1));
+  const record = s.api.registry.get(id);
+  Object.assign(record, { boot_id: 'boot', last_heartbeat_at: new Date().toISOString(),
+    capabilities: { shell: true, display: true, sshd: true, cua: { installed: true, daemon: false, version: '0.28.2' } } });
+  s.api.action = async (_target, action) => {
+    assert.equal(action.command, 'cua-driver --version && cua-driver status');
+    return { exit_code: 0, stdout: 'cua-driver 0.28.2\nCua Driver daemon is running\n' };
+  };
+  assert.equal((await s.send(`machines/${id}/cua`, {}, 'GET')).body.data.available, true);
+  record.capabilities.cua.daemon = true;
+  const binding = { generation: 1, boot_id: 'boot' };
+  s.api.cua = {
+    async create(machine, _target, bound, actor) {
+      assert.equal(machine, id); assert.deepEqual(bound, binding); assert.equal(actor, 'user:1');
+      return { id: randomUUID() };
+    },
+    async call(machine, _session, actor, bound, tool) {
+      assert.equal(machine, id); assert.equal(actor, 'user:1'); assert.deepEqual(bound, binding);
+      assert.equal(tool, 'list_windows'); return { content: [] };
+    },
+  };
+  const session = (await s.send(`machines/${id}/cua-sessions`, { actor: 'user:1' })).body.data.id;
+  assert.deepEqual((await s.send(`machines/${id}/cua-sessions/${session}/calls`, { actor: 'user:1', tool: 'list_windows', arguments: {} })).body.data, { content: [] });
+  record.last_heartbeat_at = new Date(Date.now() - 90_000).toISOString();
+  await assert.rejects(s.send(`machines/${id}/cua-sessions/${session}/calls`, { actor: 'user:1', tool: 'list_windows' }), conflict);
+});
+
 test('uncertain create and start never expose stopped release evidence, including after core reload', async t => {
   const s = setup(t); const id = s.create.id;
   const create = s.runtime.create;

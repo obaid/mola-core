@@ -4,6 +4,7 @@ import { statePath } from './paths.js';
 import { authorised, validateSpec, validateAction } from './api.js';
 import { revokeDesktop } from './desktop.js';
 import { handleSsh, revokeSsh } from './ssh.js';
+import { CuaSessions, revokeCua } from './cua.js';
 import { storageOperation, STORAGE_VERBS } from './host-storage.js';
 import { revokeDataPlane } from './data-plane.js';
 
@@ -55,8 +56,8 @@ export function hostDescription(record, runtime, settledOperationKey = null) {
  * Tombstones and results are retained to fence delayed messages after deletion.
  */
 export class HostApi {
-  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', desktop, action, session, tunnel, snapshotTransfer = null }) {
-    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, session, tunnel, snapshotTransfer });
+  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', desktop, action, session, tunnel, snapshotTransfer = null, cua = new CuaSessions() }) {
+    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, session, tunnel, snapshotTransfer, cua });
     this.locks = new Map();
   }
 
@@ -98,10 +99,28 @@ export class HostApi {
     if (method === 'GET' && parts.length === 2) {
       return { status: 200, body: { data: await this.describe(this.record(parts[1])) } };
     }
+    if (method === 'GET' && parts.length === 3 && parts[2] === 'cua') {
+      if (!UUID.test(parts[1] || '')) fail(400, 'id must be a UUID.');
+      return this.locked(parts[1], async () => {
+        const record = this.record(parts[1]);
+        const described = await this.runtime.describe(parts[1]);
+        if (!hostDescription(record, described).ready) fail(409, 'Machine is not ready.');
+        const probe = await this.action({ id: record.id, ...described }, {
+          action: 'exec', command: 'cua-driver --version && cua-driver status', timeout: 10,
+        });
+        const version = /^cua-driver ([0-9]+\.[0-9]+\.[0-9]+)/m.exec(probe.stdout || '')?.[1] ?? null;
+        return { status: 200, body: { data: { available: probe.exit_code === 0 && version !== null,
+          version, hyprland_plugin: false } } };
+      });
+    }
     if (method === 'GET' && parts.length === 4 && parts[2] === 'snapshots') {
       this.record(parts[1]);
       if (!UUID.test(parts[3] || '')) fail(400, 'snapshot_id must be a UUID.');
       return { status: 200, body: { data: await this.runtime.snapshotManifest(parts[1], parts[3]) } };
+    }
+    if (parts.length >= 3 && parts[2] === 'cua-sessions') {
+      if (!UUID.test(parts[1] || '')) fail(400, 'id must be a UUID.');
+      return this.locked(parts[1], () => this.handleCua(parts[1], method, parts, body));
     }
     if (method !== 'POST') fail(405, 'Method not allowed.');
     const verb = parts.length === 1 ? 'create' : parts[2];
@@ -137,6 +156,29 @@ export class HostApi {
     }
     if (!(parts.length === 1 || parts.length === 3) || !['create', 'start', 'shutdown', 'force-stop', 'destroy'].includes(verb)) fail(404, 'Not found.');
     return this.locked(id, () => this.mutate(id, verb, body));
+  }
+
+  async handleCua(id, method, parts, body) {
+    const record = this.record(id);
+    const described = await this.runtime.describe(id);
+    const view = hostDescription(record, described);
+    if (!view.ready) fail(409, 'Machine is not ready for Cua.');
+    const binding = { generation: record.cloud.generation, boot_id: record.boot_id };
+    const actor = body?.actor;
+    if (typeof actor !== 'string' || !/^[A-Za-z0-9:_-]{1,128}$/.test(actor)) fail(400, 'actor is required.');
+    if (method === 'POST' && parts.length === 3) {
+      return { status: 201, body: { data: await this.cua.create(id, described, binding, actor) } };
+    }
+    const session = parts[3];
+    if (!UUID.test(session || '')) fail(400, 'session must be a UUID.');
+    if (method === 'POST' && parts.length === 5 && parts[4] === 'calls') {
+      if (typeof body.tool !== 'string' || body.tool.length > 80) fail(400, 'tool is required.');
+      return { status: 200, body: { data: await this.cua.call(id, session, actor, binding, body.tool, body.arguments ?? {}) } };
+    }
+    if (method === 'POST' && parts.length === 5 && parts[4] === 'end') {
+      return { status: 200, body: { data: this.cua.end(id, session, actor, binding) } };
+    }
+    fail(404, 'Not found.');
   }
 
   async validateDesktop(id, binding) {
@@ -237,7 +279,7 @@ export class HostApi {
       this.registry.flush();
     }
     const operation = record.cloud.operations[key];
-    if (verb !== 'create') { revokeDesktop(id); revokeSsh(id); revokeDataPlane(id); }
+    if (verb !== 'create') { revokeDesktop(id); revokeSsh(id); revokeDataPlane(id); revokeCua(id); }
     if (verb === 'create') {
       if (record.cloud.image_ref !== this.imageRef) fail(409, 'Pending create requires its original installed image.');
       await this.runtime.create({ computer_id: id, ...record.cloud.create_spec,
