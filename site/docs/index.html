@@ -60,6 +60,7 @@
           </ol>
         </li>
         <li><a href="#mcp">MCP</a></li>
+        <li><a href="#cua">Cua Driver</a></li>
         <li><a href="#api">API reference</a></li>
         <li><a href="#trouble">Troubleshooting</a></li>
         <li class="away"><a href="https://github.com/obaid/mola-core">GitHub &#8599;</a></li>
@@ -287,6 +288,15 @@ curl -X POST $API/machines/$ID/actions -H <span class="a">"Authorization: Bearer
     </div>
 
     <p><a href="https://github.com/obaid/mola-core/blob/main/docs/mcp.md">Full MCP setup</a>, including Claude Desktop, Cursor, and what to do when something goes wrong.</p>
+  </section>
+<section id="cua">
+    <h2>Cua Driver in Omarchy</h2>
+    <p>Cua-enabled Omarchy images include the driver and an agent skill inside each computer. An agent running in the guest can inspect the desktop, windows, accessibility tree, and browser through the local driver. Check the image you are using from a guest terminal:</p>
+<pre><code>cua-driver --version
+cua-driver status
+ls ~/.agents/skills/cua-driver</code></pre>
+    <p>Availability follows the guest image. Updating the <code>mola-core</code> npm package alone does not replace an existing self-hosted computer's disk. Mola Cloud installs Cua on older retained Omarchy disks when they next become ready and exposes authenticated sessions through its <a href="https://cloud.mola.sh/docs/cua">Cua API and agent tools</a>.</p>
+    <p>The current image leaves the experimental Hyprland input plugin disabled. Desktop-scoped input works when the tool arguments include <code>scope: "desktop"</code>; window-scoped input may return <code>isError</code>. Inspect each result and take a fresh desktop state after input. Read the <a href="https://github.com/obaid/mola-core/blob/main/docs/cua.md">full Cua guide</a> for image and skill details.</p>
   </section>
 <section id="api">
     <h2>API reference</h2>
