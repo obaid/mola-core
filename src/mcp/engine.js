@@ -32,7 +32,7 @@ export class EngineError extends Error {
 
 export function createEngine({
   base = process.env.MOLA_API || `http://127.0.0.1:${process.env.MOLA_PORT || 4141}`,
-  token = readToken(),
+  token = process.env.MOLA_TOKEN || readToken(),
   fetchImpl = fetch,
 } = {}) {
   async function call(method, path, body, { timeoutMs = 180_000 } = {}) {

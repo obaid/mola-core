@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Replace the initial example scaffolding with end-to-end REST, persistent
+  action-session, Chromium/CDP, Jev, Claude Code, Codex, OpenClaw and Hermes
+  integrations, plus a disposable-host smoke test.
+- Add a reproducible social-report benchmark with clean computers, built-in
+  Claude Code and Codex adapters, timeouts, run-scoped transport telemetry,
+  claim-to-citation quality scoring, comparison output and committed reference
+  runs.
+- Let remote MCP processes authenticate with an explicit `MOLA_TOKEN` instead
+  of requiring a token file on the MCP client machine.
+
 ## 1.4.1 — 2026-09-22
 
 - Document persistent action sessions, binary transfers, changed-screen

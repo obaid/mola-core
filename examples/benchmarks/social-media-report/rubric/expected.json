@@ -1,5 +1,16 @@
 {
   "required_sections": ["themes", "notable", "praise", "complaints", "engagement", "competitive", "actionable"],
-  "facts": ["Rover Mini", "1,240", "quiet motors", "Linux SDK", "replacement parts", "Wi-Fi", "BetaBot Pocket", "battery life"],
-  "sources": ["launch.html", "support.html", "market.html"]
+  "claims": [
+    { "fact": "Rover Mini", "sources": ["launch.html"] },
+    { "fact": "1,240", "sources": ["launch.html"] },
+    { "fact": "quiet motors", "sources": ["launch.html"] },
+    { "fact": "Linux SDK", "sources": ["launch.html"] },
+    { "fact": "replacement parts", "sources": ["support.html"] },
+    { "fact": "Wi-Fi", "sources": ["support.html"] },
+    { "fact": "BetaBot Pocket", "sources": ["market.html"] },
+    { "fact": "battery life", "sources": ["market.html"] }
+  ],
+  "sources": ["launch.html", "support.html", "market.html"],
+  "allowed_numbers": ["1,240", "188", "94", "73", "22", "86", "310"],
+  "actionable_observations": 5
 }

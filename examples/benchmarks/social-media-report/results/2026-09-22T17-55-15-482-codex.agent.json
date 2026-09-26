@@ -1,0 +1,8 @@
+{
+  "agent_version": "codex-cli 0.154.0",
+  "model": "gpt-5.6-luna",
+  "input_tokens": 188212,
+  "output_tokens": 2040,
+  "cached_input_tokens": 164864,
+  "model_calls": 1
+}

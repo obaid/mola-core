@@ -1,0 +1,125 @@
+{
+  "schema": 2,
+  "run_id": "2026-09-22T17-57-59-285-claude-code",
+  "agent": "claude-code",
+  "agent_version": "2.1.280 (Claude Code)",
+  "model": "sonnet",
+  "mode": "fixture",
+  "deterministic": true,
+  "mola_commit": "4aa7e66",
+  "image_ref": "omarchy-agent:0.1.0",
+  "fixture_version": "2",
+  "started_at": "2026-09-22T17:57:59.285Z",
+  "duration_ms": 178366,
+  "time_to_first_action_ms": 102508,
+  "machine_ready_ms": 26490,
+  "success": true,
+  "timeout_ms": 600000,
+  "machine": {
+    "vcpus": 2,
+    "memory_mb": 4096,
+    "disk_gb": 20
+  },
+  "environment": [
+    "os=Linux 7.2.4-arch1-2 x86_64 GNU/Linux",
+    "browser=Chromium 153.0.8010.36 Arch Linux",
+    "python=Python 3.14.7"
+  ],
+  "mola": {
+    "actions": 8,
+    "action_count_by_type": {
+      "exec": 6,
+      "write_file": 1,
+      "read_file": 1
+    },
+    "bytes_in": 3238,
+    "bytes_out": 5901,
+    "transport_ms": 2230.399,
+    "p50_action_ms": 211.964,
+    "p95_action_ms": 389.883,
+    "failures": 0,
+    "percent_of_wall_time": 1.25,
+    "measurement": "run-scoped REST proxy",
+    "core_data_plane": {
+      "sessions": 0,
+      "actions": 0,
+      "bytes_in": 0,
+      "bytes_out": 0,
+      "stale_rejects": 0,
+      "backpressure_rejects": 0,
+      "reconnects": 0,
+      "transport_ms": 0,
+      "mean_action_ms": null,
+      "action_latency_ms": {},
+      "counters_are_host_global": true
+    }
+  },
+  "agent_reported": {
+    "agent_version": "2.1.280 (Claude Code)",
+    "model": "sonnet",
+    "input_tokens": 48,
+    "output_tokens": 6053,
+    "cache_creation_input_tokens": 72405,
+    "cache_read_input_tokens": 1212610,
+    "cost_usd": 2.008679,
+    "model_calls": 26
+  },
+  "report": {
+    "file": "2026-09-22T17-57-59-285-claude-code.report.md",
+    "bytes": 2631,
+    "words": 310
+  },
+  "quality": {
+    "evaluated": true,
+    "required_sections": 1,
+    "supported_claim_ratio": 1,
+    "claim_citation_ratio": 1,
+    "citation_validity": 1,
+    "actionable_observations": 1,
+    "duplicate_actionable_observations": 0,
+    "unsupported_numeric_claims": [],
+    "passed": true,
+    "claims": [
+      {
+        "fact": "Rover Mini",
+        "present": true,
+        "cited": true
+      },
+      {
+        "fact": "1,240",
+        "present": true,
+        "cited": true
+      },
+      {
+        "fact": "quiet motors",
+        "present": true,
+        "cited": true
+      },
+      {
+        "fact": "Linux SDK",
+        "present": true,
+        "cited": true
+      },
+      {
+        "fact": "replacement parts",
+        "present": true,
+        "cited": true
+      },
+      {
+        "fact": "Wi-Fi",
+        "present": true,
+        "cited": true
+      },
+      {
+        "fact": "BetaBot Pocket",
+        "present": true,
+        "cited": true
+      },
+      {
+        "fact": "battery life",
+        "present": true,
+        "cited": true
+      }
+    ]
+  }
+}
