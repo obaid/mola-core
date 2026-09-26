@@ -11,6 +11,7 @@ import { SNAPSHOT_CHUNK_BODY_BYTES } from './host-storage.js';
 import { attachSsh } from './ssh.js';
 import { SnapshotTransfer } from './snapshot-transfer.js';
 import { attachDataPlane, getDataPlaneMetrics, mintActionTicket, mintTunnelTicket, revokeDataPlane } from './data-plane.js';
+import { CuaRollout } from './cua-rollout.js';
 
 const json = (response, status, body) => {
   const payload = JSON.stringify(body, null, 2);
@@ -68,6 +69,7 @@ export async function createServer({ host, port, registry = new Registry(), runt
     snapshotTransfer: new SnapshotTransfer(),
   });
   function recordIsCloud(id) { return Boolean(registry.get(id)?.cloud); }
+  const cuaRollout = new CuaRollout(hostApi);
 
   await runtime.start();
 
@@ -135,6 +137,7 @@ export async function createServer({ host, port, registry = new Registry(), runt
         if (!record) return json(response, 401, { message: 'Unauthenticated.' });
         if (parts[1] === 'heartbeat') {
           const result = guests.heartbeat(record, body);
+          cuaRollout.schedule(record);
           return json(response, result.status, result.body);
         }
         if (parts[1] === 'shutdown-ack') {

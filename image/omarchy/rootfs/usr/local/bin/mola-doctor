@@ -17,6 +17,8 @@ check "chromium"         "command -v chromium"
 check "foot terminal"    "command -v foot"
 check "guest daemon"     "command -v mola-guest"
 check "sshd"             "command -v sshd"
+check "cua driver"       "cua-driver --version"
+check "cua daemon"       "su dev -c 'cua-driver status'"
 check "persistent home"  "mountpoint -q /home/dev || [ -d /home/dev ]"
 check "drm render node"  "[ -d /dev/dri ]"
 exit $fail

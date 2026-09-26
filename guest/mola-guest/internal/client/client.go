@@ -107,9 +107,16 @@ type Sessions struct {
 // not call a computer ready without it — a recent heartbeat proves the daemon
 // is alive, not that the computer works.
 type Capabilities struct {
-	Shell   bool `json:"shell"`
-	Display bool `json:"display"`
-	SSHD    bool `json:"sshd"`
+	Shell   bool             `json:"shell"`
+	Display bool             `json:"display"`
+	SSHD    bool             `json:"sshd"`
+	Cua     *CuaCapabilities `json:"cua,omitempty"`
+}
+
+type CuaCapabilities struct {
+	Installed bool   `json:"installed"`
+	Version   string `json:"version"`
+	Daemon    bool   `json:"daemon"`
 }
 
 // HeartbeatRequest is the body of POST /guest/heartbeat.

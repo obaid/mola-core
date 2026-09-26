@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Keep the Mola-pinned Cua release available to desktop terminals and SSH agents.
+set -euo pipefail
+
+export CUA_DRIVER_RS_ENABLE_WAYLAND="${CUA_DRIVER_RS_ENABLE_WAYLAND:-1}"
+export CUA_DRIVER_RS_TELEMETRY_ENABLED="${CUA_DRIVER_RS_TELEMETRY_ENABLED:-false}"
+export CUA_DRIVER_RS_UPDATE_CHECK="${CUA_DRIVER_RS_UPDATE_CHECK:-false}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for socket in "${XDG_RUNTIME_DIR}"/wayland-*; do
+        case "$socket" in *.lock) continue ;; esac
+        if [ -S "$socket" ]; then
+            export WAYLAND_DISPLAY="$(basename "$socket")"
+            break
+        fi
+    done
+fi
+
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "${XDG_RUNTIME_DIR}/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+fi
+
+exec /opt/mola/cua-driver/current/cua-driver "$@"
