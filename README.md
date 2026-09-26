@@ -159,6 +159,7 @@ in this repository:
 - [Troubleshooting](docs/troubleshooting.md), failures you are likely to hit
 - [Development](docs/development.md), working on the engine itself
 - [Action sessions](docs/action-session.md), persistent actions, screen frames and tunnels
+- [Cua Driver](docs/cua.md), native computer-use tools in supported Omarchy images
 - [Performance](docs/performance.md), repeatable transport benchmarks
 
 ## What is in this repository
