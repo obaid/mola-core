@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.5.0 — 2026-09-25
+
+- Add pinned Cua Driver 0.28.2 and its agent skill to new Omarchy image builds.
+  Hosted older disks receive the driver after their next ready heartbeat.
+- Add private, owner-bound, boot-bound Cua MCP sessions for hosted control planes.
+  Sessions expose computer-use tools without exposing the guest driver socket.
+- Include the Cua installer and public [Cua guide](docs/cua.md) in the npm
+  package. Updating npm alone does not replace a self-hosted guest image or
+  upgrade existing self-hosted disks.
+- Keep the experimental Hyprland input plugin disabled. Desktop-scoped input
+  works; window-scoped input may return MCP `isError` on this compositor.
+
 ## 1.4.1 — 2026-09-22
 
 - Document persistent action sessions, binary transfers, changed-screen
