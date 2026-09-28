@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1 — 2026-09-27
+
+- Reconcile the retained local Cua work with the already-published 1.5.0 source.
+  This release refreshes package version metadata without runtime behavior changes.
+- Retain the current Cua, action-session, snapshot and public documentation updates.
+
 ## 1.5.0 — 2026-09-25
 
 - Add pinned Cua Driver 0.28.2 and its agent skill to new Omarchy image builds.
