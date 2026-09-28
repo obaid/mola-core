@@ -28,6 +28,15 @@ type Report struct {
 	Shell   bool `json:"shell"`
 	Display bool `json:"display"`
 	SSHD    bool `json:"sshd"`
+	Cua     *Cua `json:"cua,omitempty"`
+}
+
+// Cua describes the optional, in-guest desktop driver. Daemon readiness is
+// measured independently of the three capabilities required for machine boot.
+type Cua struct {
+	Installed bool   `json:"installed"`
+	Version   string `json:"version"`
+	Daemon    bool   `json:"daemon"`
 }
 
 // Prober collects capability evidence.
@@ -61,7 +70,31 @@ func (p *Prober) Probe(ctx context.Context) Report {
 		Shell:   p.probeShell(ctx),
 		Display: p.probeListener(p.DisplayAddr),
 		SSHD:    p.probeListener(p.SSHAddr),
+		Cua:     p.probeCua(ctx),
 	}
+}
+
+func (p *Prober) probeCua(ctx context.Context) *Cua {
+	const binary = "/usr/local/bin/cua-driver"
+	if _, err := os.Stat(binary); err != nil {
+		return nil
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, p.Timeout)
+	defer cancel()
+	output, err := exec.CommandContext(probeCtx, binary, "--version").Output()
+	if err != nil {
+		return &Cua{}
+	}
+	version := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(output)), "cua-driver "))
+	if version == "" || len(version) > 32 {
+		return &Cua{}
+	}
+	statusCtx, stop := context.WithTimeout(ctx, p.Timeout)
+	defer stop()
+	// The daemon belongs to the graphical `dev` user, not the root-owned guest
+	// heartbeat service. Querying status as root would inspect the wrong socket.
+	daemon := exec.CommandContext(statusCtx, "su", "dev", "-c", binary+" status").Run() == nil
+	return &Cua{Installed: true, Version: version, Daemon: daemon}
 }
 
 // probeShell proves a command can actually be executed. A machine whose

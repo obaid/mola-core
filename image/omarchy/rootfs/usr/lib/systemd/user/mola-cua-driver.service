@@ -1,0 +1,12 @@
+[Unit]
+Description=Cua Driver for the Mola Omarchy desktop
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/bin/mola-cua-wait
+ExecStart=/usr/local/bin/cua-driver serve
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

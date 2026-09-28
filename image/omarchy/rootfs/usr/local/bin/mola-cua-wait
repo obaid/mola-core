@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+for _ in $(seq 1 120); do
+    for socket in "$runtime"/wayland-*; do
+        case "$socket" in *.lock) continue ;; esac
+        [ -S "$socket" ] && exit 0
+    done
+    sleep 1
+done
+exit 1

@@ -21,7 +21,8 @@
     "THIRD_PARTY_NOTICES.md",
     "CHANGELOG.md",
     "docs/host-storage.md",
-    "docs/guest-agent-image-update.md"
+    "docs/guest-agent-image-update.md",
+    "docs/cua-rollout.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",

@@ -348,6 +348,14 @@ func (d *Daemon) beat(ctx context.Context) (bool, error) {
 
 	counts := d.activity.Read()
 	caps := d.capabil.Probe(ctx)
+	var cua *client.CuaCapabilities
+	if caps.Cua != nil {
+		cua = &client.CuaCapabilities{
+			Installed: caps.Cua.Installed,
+			Version:   caps.Cua.Version,
+			Daemon:    caps.Cua.Daemon,
+		}
+	}
 
 	resp, err := d.client.Heartbeat(ctx, token, client.HeartbeatRequest{
 		UptimeSeconds: d.activity.Uptime(),
@@ -367,6 +375,7 @@ func (d *Daemon) beat(ctx context.Context) (bool, error) {
 			Shell:   caps.Shell,
 			Display: caps.Display,
 			SSHD:    caps.SSHD,
+			Cua:     cua,
 		},
 	})
 	if err != nil {

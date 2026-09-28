@@ -150,6 +150,21 @@ fi
 
 log info "compositor up on ${WAYLAND_DISPLAY}"
 
+# The Cua daemon must inherit the compositor's own Wayland and session-bus
+# identity. A systemd user service supervises it on KVM; the direct fallback
+# covers guests without a user systemd manager.
+if systemctl --user show-environment >/dev/null 2>&1; then
+    if systemctl --user import-environment XDG_RUNTIME_DIR WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS \
+        && systemctl --user restart mola-cua-driver.service; then
+        log info "Cua Driver started in the graphical user session"
+    else
+        log warn "Cua Driver user service failed; desktop remains available"
+    fi
+else
+    /usr/local/bin/cua-driver serve >>"${LOG_DIR}/cua-driver.log" 2>&1 &
+    log info "Cua Driver started without a user systemd manager"
+fi
+
 # wayvnc speaks wlr-screencopy, which Hyprland implements. It binds to all
 # interfaces inside the guest only because the guest's own network is private;
 # nothing reaches it except the authenticated Mola desktop gateway.

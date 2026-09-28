@@ -75,6 +75,14 @@ export class GuestService {
         shell: Boolean(body?.capabilities?.shell),
         display: Boolean(body?.capabilities?.display),
         sshd: Boolean(body?.capabilities?.sshd),
+        ...(body?.capabilities?.cua && typeof body.capabilities.cua === 'object' ? {
+          cua: {
+            installed: body.capabilities.cua.installed === true,
+            version: typeof body.capabilities.cua.version === 'string'
+              ? body.capabilities.cua.version.slice(0, 32) : '',
+            daemon: body.capabilities.cua.daemon === true,
+          },
+        } : {}),
       },
     });
 

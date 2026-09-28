@@ -16,6 +16,10 @@ third-party operating systems, packages, artwork, fonts, or trademarks.
   recorded by the packages in `package-lock.json`.
 - noVNC: MPL-2.0. Source: https://github.com/novnc/noVNC.
 - vncdotool: MIT. Source: https://github.com/sibson/vncdotool.
+- Cua Driver and its agent skill pack: MIT, copyright Cua AI, Inc. The
+  versioned release artifacts come from https://github.com/trycua/cua and the
+  full license is included in Omarchy images at
+  `/usr/share/licenses/cua-driver/LICENSE.md`.
 - Archivo and Martian Mono fonts: SIL Open Font License. Built assets self-host
   downloaded fonts; preserve the associated font notices when distributing.
 
