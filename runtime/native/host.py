@@ -26,6 +26,18 @@ import time
 ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SNAPSHOT_CHUNK_BYTES = 8 * 1024 * 1024
 SNAPSHOT_CHUNK_ENCODED_BYTES = 11184812
+DEFAULT_REQUEST_BYTES = 1536 * 1024
+# PHP escapes `/` in base64 JSON as `\/`; reserve for the worst-case wire
+# representation, then enforce the decoded 8 MiB limit in write_snapshot_chunk.
+SNAPSHOT_WRITE_REQUEST_BYTES = (2 * SNAPSHOT_CHUNK_ENCODED_BYTES) + 64 * 1024
+
+
+def request_body_limit(path, method):
+    """Keep ordinary loopback calls small while admitting one snapshot chunk."""
+    parts = path.strip('/').split('/')
+    if method == 'POST' and len(parts) == 3 and parts[0] == 'machines' and parts[2] == 'snapshot-write':
+        return SNAPSHOT_WRITE_REQUEST_BYTES
+    return DEFAULT_REQUEST_BYTES
 
 
 def write_json(path, value):
@@ -383,8 +395,11 @@ class Runner:
     def destroy(self, identifier, delete_disk):
         folder = self.folder(identifier)
         retained = self.root / 'retained' / (identifier + '.ext4')
+        snapshots = self.root / 'snapshots' / identifier
         if not folder.exists():
-            if delete_disk: retained.unlink(missing_ok=True)
+            if delete_disk:
+                retained.unlink(missing_ok=True)
+                if snapshots.exists(): shutil.rmtree(snapshots)
             return
         data = self.metadata(identifier)
         if self.status(data) != 'stopped': raise ValueError('Stop the computer before deleting it')
@@ -398,6 +413,7 @@ class Runner:
                 write_json(folder / 'machine.json', data)
                 (folder / 'root.ext4').rename(retained)
         shutil.rmtree(folder)
+        if delete_disk and snapshots.exists(): shutil.rmtree(snapshots)
 
     def reseed(self, identifier, payload):
         self.require_stopped(identifier)
@@ -494,12 +510,17 @@ class Runner:
                                 '--image', str(self.image), '--disk', str(temporary), '--architecture', self.arch],
                                check=True, capture_output=True, timeout=900)
                 with temporary.open('rb') as stream: os.fsync(stream.fileno())
+            if payload.get('fork', False):
+                subprocess.run(['python3', str(Path(__file__).with_name('sanitize_clone.py')),
+                                '--disk', str(temporary)], check=True, capture_output=True, timeout=300)
+                with temporary.open('rb') as stream: os.fsync(stream.fileno())
             self.require_stopped(identifier)
             temporary.replace(destination)
             self.sync_directory(destination.parent)
         finally: temporary.unlink(missing_ok=True)
         return {'id': identifier, 'snapshot_id': manifest['id'], 'status': 'stopped',
-                'snapshot_sha256': manifest['sha256'], 'guest_agent_refreshed': bool(self.config.get('guest_agent_refresh', False))}
+                'snapshot_sha256': manifest['sha256'], 'guest_agent_refreshed': bool(self.config.get('guest_agent_refresh', False)),
+                'fork_identity_reset': bool(payload.get('fork', False))}
 
     @staticmethod
     def sync_directory(path):
@@ -631,7 +652,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get('Origin'):
                 return self.reply(403, {'error': 'Browser origins are not accepted'})
             size = int(self.headers.get('Content-Length', '0'))
-            if size < 0 or size > 1572864: return self.reply(413, {'error': 'Request too large'})
+            if size < 0 or size > request_body_limit(self.path, self.command):
+                return self.reply(413, {'error': 'Request too large'})
             self.connection.settimeout(10)
             payload = json.loads(self.rfile.read(size)) if size else {}
             parts = self.path.strip('/').split('/')

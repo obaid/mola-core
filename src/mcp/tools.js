@@ -50,9 +50,9 @@ export function buildTools(engine) {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'A label to recognise it by. Optional.' },
-        vcpus: { type: 'integer', description: 'Defaults to 4.' },
-        memory_mb: { type: 'integer', description: 'Defaults to 4096. Each running machine holds this much RAM on the host.' },
-        disk_gb: { type: 'integer', description: 'Defaults to 40.' },
+        vcpus: { type: 'integer', description: 'Optional. Uses the host-configured default (4 unless changed).' },
+        memory_mb: { type: 'integer', description: 'Optional. Uses the host-configured default (4096 MB unless changed). Each running machine holds this much RAM on the host.' },
+        disk_gb: { type: 'integer', description: 'Optional. Uses the host-configured default (40 GB unless changed).' },
       },
     },
   }, async (args) => {

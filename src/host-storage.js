@@ -1,17 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { revokeDesktop } from './desktop.js';
 import { revokeSsh } from './ssh.js';
+import { revokeDataPlane } from './data-plane.js';
 import { revokeCua } from './cua.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const SNAPSHOT_CHUNK_BYTES = 8 * 1024 * 1024;
 export const SNAPSHOT_CHUNK_ENCODED_BYTES = Math.ceil(SNAPSHOT_CHUNK_BYTES / 3) * 4;
+// PHP's JSON encoder escapes `/` in base64 as `\/`. In the worst case the
+// wire representation is twice the validated base64 length; validation below
+// still caps the decoded payload at exactly SNAPSHOT_CHUNK_BYTES.
+export const SNAPSHOT_CHUNK_BODY_BYTES = (2 * SNAPSHOT_CHUNK_ENCODED_BYTES) + (64 * 1024);
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const stable = value => JSON.stringify(value, (_, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 export const STORAGE_VERBS = ['snapshot', 'restore', 'snapshot-delete', 'snapshot-import', 'snapshot-write', 'snapshot-read', 'snapshot-seal', 'snapshot-export', 'snapshot-import-direct', 'fence'];
 const fields = {
-  snapshot: ['snapshot_id'], restore: ['snapshot_id'], 'snapshot-delete': ['snapshot_id'],
+  snapshot: ['snapshot_id'], restore: ['snapshot_id', 'fork'], 'snapshot-delete': ['snapshot_id'],
   'snapshot-import': ['snapshot_id', 'manifest'], 'snapshot-write': ['snapshot_id', 'offset', 'data', 'sha256'],
   'snapshot-read': ['snapshot_id', 'offset'], 'snapshot-seal': ['snapshot_id'],
   'snapshot-export': ['snapshot_id', 'grant'], 'snapshot-import-direct': ['snapshot_id', 'manifest', 'grant'], fence: [],
@@ -24,6 +29,7 @@ export async function storageOperation(api, id, verb, body) {
   const chunk = ['snapshot-write', 'snapshot-read', 'snapshot-export', 'snapshot-import-direct'].includes(verb);
   if (Object.keys(body).some(key => ![...fields[verb], ...(chunk ? [] : ['operation_id', 'generation'])].includes(key))) fail(400, 'Unknown storage operation field.');
   if (verb !== 'fence' && !UUID.test(body.snapshot_id || '')) fail(400, 'snapshot_id must be a UUID.');
+  if (verb === 'restore' && Object.hasOwn(body, 'fork') && typeof body.fork !== 'boolean') fail(400, 'fork must be a boolean.');
   if (chunk) {
     if (['snapshot-export', 'snapshot-import-direct'].includes(verb)) {
       if (!api.snapshotTransfer || !body.grant || typeof body.grant !== 'object' || Array.isArray(body.grant)) fail(400, 'Invalid direct snapshot transfer grant.');
@@ -74,7 +80,7 @@ export async function storageOperation(api, id, verb, body) {
     }
     api.registry.flush();
   }
-  if (['restore', 'fence'].includes(verb)) { revokeDesktop(id); revokeSsh(id); revokeCua(id); }
+  if (['restore', 'fence'].includes(verb)) { revokeDesktop(id); revokeSsh(id); revokeDataPlane(id); revokeCua(id); }
   const data = await api.runtime.storageOperation(id, verb, body);
   if (verb === 'restore') await api.runtime.reseed(id, {
     registration_token: record.registration_token, authorized_keys: record.authorized_keys, name: record.name,

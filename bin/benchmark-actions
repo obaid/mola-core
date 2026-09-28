@@ -1,0 +1,161 @@
+#!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { arch, platform } from 'node:os';
+import process from 'node:process';
+import { WebSocket } from 'ws';
+
+const argv = process.argv.slice(2);
+const args = {};
+for (let index = 0; index < argv.length; index += 1) {
+  const value = argv[index];
+  if (!value.startsWith('--')) continue;
+  const next = argv[index + 1];
+  args[value.slice(2)] = !next || next.startsWith('--') ? true : next;
+  if (next && !next.startsWith('--')) index += 1;
+}
+const api = String(args.api || process.env.MOLA_API || 'http://127.0.0.1:4141/v1').replace(/\/$/, '');
+const token = String(args.token || process.env.MOLA_TOKEN || '');
+const machine = String(args.machine || '');
+const iterations = Number(args.iterations || 10);
+const transport = String(args.transport || 'both');
+if (!token || !machine || !['rest', 'session', 'both'].includes(transport) || !Number.isInteger(iterations) || iterations < 1 || iterations > 1000) {
+  console.error('Usage: benchmark-actions --machine ID [--api URL] [--token TOKEN] [--transport rest|session|both] [--iterations 10] [--json]');
+  process.exit(2);
+}
+
+const quantile = (sorted, value) => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * value))];
+const summarize = samples => {
+  const values = samples.map(sample => sample.duration_ms).sort((a, b) => a - b);
+  return {
+    count: values.length,
+    min_ms: values[0],
+    p50_ms: quantile(values, .5),
+    p90_ms: quantile(values, .9),
+    p95_ms: quantile(values, .95),
+    p99_ms: quantile(values, .99),
+    max_ms: values.at(-1),
+    cold_ms: samples[0].duration_ms,
+    warm_p50_ms: summarizeWarm(samples.slice(1)),
+    bytes: samples.reduce((sum, sample) => sum + sample.bytes, 0),
+  };
+};
+const summarizeWarm = samples => {
+  if (!samples.length) return null;
+  const values = samples.map(sample => sample.duration_ms).sort((a, b) => a - b);
+  return quantile(values, .5);
+};
+async function restAction(body) {
+  const started = performance.now();
+  const response = await fetch(`${api}/machines/${encodeURIComponent(machine)}/actions`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(180_000),
+  });
+  const raw = await response.text();
+  const bytes = Buffer.byteLength(raw);
+  const payload = JSON.parse(raw);
+  if (!response.ok) throw new Error(payload.message || `Action failed with ${response.status}`);
+  return { duration_ms: Number((performance.now() - started).toFixed(3)), bytes, timing: payload.data?._mola_timing };
+}
+async function openSession() {
+  const setupStarted = performance.now();
+  const response = await fetch(`${api}/machines/${encodeURIComponent(machine)}/session`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000),
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.message || `Session grant failed with ${response.status}`);
+  const socket = new WebSocket(payload.data.session_url);
+  await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+  const pending = new Map();
+  socket.on('message', (data, binary) => {
+    if (binary) return;
+    const message = JSON.parse(data.toString());
+    const request = pending.get(message.id);
+    if (!request) return;
+    pending.delete(message.id);
+    message.ok ? request.resolve(message.result) : request.reject(new Error(message.error?.message || 'Session action failed.'));
+  });
+  let sequence = 0;
+  return {
+    socket,
+    setup_ms: Number((performance.now() - setupStarted).toFixed(3)),
+    action(body) {
+      const id = `bench-${++sequence}`;
+      const started = performance.now();
+      return new Promise((resolve, reject) => {
+        pending.set(id, {
+          resolve: result => resolve({ duration_ms: Number((performance.now() - started).toFixed(3)), bytes: Buffer.byteLength(JSON.stringify(result)), timing: result?._mola_timing }),
+          reject,
+        });
+        socket.send(JSON.stringify({ id, op: 'action', action: body }));
+      });
+    },
+  };
+}
+const contents = size => 'm'.repeat(size);
+const workloads = [
+  ['exec_true', () => ({ action: 'exec', command: 'true' })],
+  ['exec_echo', () => ({ action: 'exec', command: 'echo ok' })],
+  ['write_1k', () => ({ action: 'write_file', path: '/tmp/mola-bench-1k', content: contents(1024) })],
+  ['read_1k', () => ({ action: 'read_file', path: '/tmp/mola-bench-1k' })],
+  ['write_100k', () => ({ action: 'write_file', path: '/tmp/mola-bench-100k', content: contents(100 * 1024) })],
+  ['read_100k', () => ({ action: 'read_file', path: '/tmp/mola-bench-100k' })],
+  ['write_1m', () => ({ action: 'write_file', path: '/tmp/mola-bench-1m', content: contents(1024 * 1024) })],
+  ['read_1m', () => ({ action: 'read_file', path: '/tmp/mola-bench-1m' })],
+  ['screenshot', () => ({ action: 'screenshot' })],
+  ['click', () => ({ action: 'click', x: 1, y: 1 })],
+  ['type_short', () => ({ action: 'type', text: 'mola' })],
+  ['type_1k', () => ({ action: 'type', text: contents(1024) })],
+];
+const results = {};
+for (const selected of (transport === 'both' ? ['rest', 'session'] : [transport])) {
+  const session = selected === 'session' ? await openSession() : null;
+  const action = selected === 'rest' ? restAction : session.action;
+  const group = {};
+  for (const [name, make] of workloads) {
+    const samples = [];
+    for (let index = 0; index < iterations; index += 1) samples.push(await action(make()));
+    group[name] = { ...summarize(samples), samples };
+  }
+  const mixedActions = workloads.slice(0, 10).flatMap(entry => [entry, entry]).slice(0, 20);
+  const mixedStarted = performance.now();
+  for (const [, make] of mixedActions) await action(make());
+  group.mixed_20 = { duration_ms: Number((performance.now() - mixedStarted).toFixed(3)), actions: 20 };
+  results[selected] = group;
+  if (session) group.session_setup_ms = session.setup_ms;
+  session?.socket.close();
+}
+const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)));
+let commit = process.env.MOLA_COMMIT || 'unknown';
+try { commit = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
+const output = {
+  schema: 1,
+  generated_at: new Date().toISOString(),
+  mola_version: packageJson.version,
+  mola_commit: commit,
+  node: process.version,
+  platform: platform(),
+  arch: arch(),
+  virtualization: String(args.virtualization || process.env.MOLA_VIRTUALIZATION || 'unknown'),
+  machine_profile: {
+    vcpus: Number(args.vcpus || process.env.MOLA_BENCH_VCPUS || 0) || null,
+    memory_mb: Number(args['memory-mb'] || process.env.MOLA_BENCH_MEMORY_MB || 0) || null,
+  },
+  api,
+  machine,
+  iterations,
+  transport,
+  results,
+};
+if (args.json) console.log(JSON.stringify(output, null, 2));
+else {
+  console.log(`Mola ${output.mola_version} action benchmark — ${platform()}/${arch()} — ${iterations} samples`);
+  for (const [selected, group] of Object.entries(results)) {
+    console.log(`\n${selected.toUpperCase()}`);
+    for (const [name, result] of Object.entries(group)) {
+      if (name === 'session_setup_ms') { console.log(`${name.padEnd(16)} ${result} ms`); continue; }
+      if (name === 'mixed_20') console.log(`${name.padEnd(16)} ${result.duration_ms} ms total`);
+      else console.log(`${name.padEnd(16)} p50 ${String(result.p50_ms).padStart(8)} ms  p95 ${String(result.p95_ms).padStart(8)} ms  cold ${String(result.cold_ms).padStart(8)} ms`);
+    }
+  }
+}

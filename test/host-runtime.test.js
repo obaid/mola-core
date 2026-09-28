@@ -45,6 +45,12 @@ with tempfile.TemporaryDirectory() as temp:
     runner.destroy(machine['computer_id'], False)
     assert not folder.exists()
     assert (retained / (machine['computer_id'] + '.ext4')).exists()
+    snapshots = root / 'snapshots' / machine['computer_id'] / '22222222-2222-4222-8222-222222222222'
+    snapshots.mkdir(parents=True)
+    (snapshots / 'upload.partial').write_bytes(b'partial')
+    runner.destroy(machine['computer_id'], True)
+    assert not (retained / (machine['computer_id'] + '.ext4')).exists()
+    assert not snapshots.parent.exists()
 `;
   const result = spawnSync('python3', ['-c', script], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);

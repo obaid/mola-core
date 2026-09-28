@@ -17,6 +17,16 @@ const ALLOWED_HEADERS = new Set([
 ]);
 
 const fail = message => { throw new Error(message); };
+const destinationFailure = (direction, status) => {
+  const retryable = status === 408 || status === 429 || status >= 500;
+  throw Object.assign(new Error(`Snapshot ${direction} was rejected with HTTP ${status}.`), {
+    // The private host API translates a permanent object-store refusal into a
+    // non-5xx response. The control plane can then stop retrying immediately
+    // instead of looping for a day on an invalid or IP-restricted grant.
+    status: retryable ? 502 : 424,
+    code: retryable ? 'snapshot_destination_unavailable' : 'snapshot_destination_refused',
+  });
+};
 
 function safeR2Url(value) {
   let url;
@@ -114,7 +124,7 @@ export class SnapshotTransfer {
           body: createReadStream(artifact, { start: part.offset, end: part.offset + part.size - 1 }), duplex: 'half',
           redirect: 'error', signal: AbortSignal.timeout(120_000),
         });
-        if (!response.ok) fail(`R2 rejected snapshot part ${part.number} with HTTP ${response.status}.`);
+        if (!response.ok) destinationFailure(`upload part ${part.number}`, response.status);
         const etag = response.headers.get('etag');
         if (!etag || etag.length > 256 || /[\r\n]/.test(etag)) fail('R2 returned an invalid multipart receipt.');
         receipt.parts[String(part.number)] = etag;
@@ -157,7 +167,8 @@ export class SnapshotTransfer {
         headers: { ...headers, ...(offset ? { range: `bytes=${offset}-` } : {}) },
         redirect: 'error', signal: controller.signal,
       });
-      if (!response.ok || (offset && response.status !== 206) || !response.body) fail(`R2 rejected snapshot download with HTTP ${response.status}.`);
+      if (!response.ok) destinationFailure('download', response.status);
+      if ((offset && response.status !== 206) || !response.body) fail('Snapshot download returned an invalid response.');
       await pipeline(Readable.fromWeb(response.body), createWriteStream(target, { flags: offset ? 'a' : 'w', mode: 0o600 }));
     } catch (error) {
       if (error?.name !== 'AbortError') throw error;

@@ -64,9 +64,9 @@ Creates a computer and starts it. Every field is optional.
 | Field | Default | Range |
 |---|---|---|
 | `name` | generated | up to 64 characters |
-| `vcpus` | 4 | 1 to 8 |
-| `memory_mb` | 4096 | 1024 to 16384 |
-| `disk_gb` | 40 | 16 to 1024 |
+| `vcpus` | host default, normally 4 | 1 to 8 |
+| `memory_mb` | host default, normally 4096 | 1024 to 16384 |
+| `disk_gb` | host default, normally 40 | 16 to 1024 |
 
 Returns 201 and the machine, in `booting`. The disk is a copy-on-write clone of
 the base image, which is why creating one takes about a second regardless of
@@ -142,6 +142,24 @@ Returns 409 if the machine is not running.
 The ticket is single use and lives sixty seconds. It travels in the URL
 fragment, which browsers do not send to servers, so it stays out of access logs
 and `Referer` headers. The page strips it from history once it connects.
+
+### `POST /v1/machines/{id}/session`
+
+Returns a single-use WebSocket URL for many ordered actions. The computer must
+be ready. The ticket expires after 60 seconds and the live connection is bound
+to the current boot. See [Low-latency action sessions](action-session.md) for
+the message, binary frame, screen subscription and error contracts.
+
+### `POST /v1/machines/{id}/tunnels`
+
+```json
+{ "port": 9222 }
+```
+
+Returns a single-use WebSocket tunnel to that port on the selected computer's
+loopback interface. Callers cannot provide a host. Privileged and Mola-managed
+ports are denied. Operational limits and the threat model are documented with
+the [action-session protocol](action-session.md#port-tunnels).
 
 ## Actions
 
@@ -229,5 +247,8 @@ proving it holds its enrolment key, rather than by repeating the token.
 | `MOLA_QEMU` | a specific QEMU binary to use |
 | `MOLA_MAX_RUNNING` | how many machines may run at once, default 2 |
 | `MOLA_MAX_MEMORY_MB` | total memory machines may reserve, default 8192 |
+| `MOLA_DEFAULT_VCPUS` | vCPU count when a create request omits `vcpus`, default 4 |
+| `MOLA_DEFAULT_MEMORY_MB` | memory when a create request omits `memory_mb`, default 4096 |
+| `MOLA_DEFAULT_DISK_GB` | disk size when a create request omits `disk_gb`, default 40 |
 | `MOLA_GPU` | override the QEMU display device |
 | `MOLA_DISPLAY` | override the QEMU display backend |

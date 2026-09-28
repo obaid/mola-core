@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Registry } from '../src/state.js';
 import { HostApi, hostToken, hostDescription } from '../src/host-api.js';
-import { SNAPSHOT_CHUNK_ENCODED_BYTES } from '../src/host-storage.js';
+import { SNAPSHOT_CHUNK_BODY_BYTES, SNAPSHOT_CHUNK_ENCODED_BYTES } from '../src/host-storage.js';
 
 const TOKEN = 'h'.repeat(40);
 function setup(t) {
@@ -33,6 +33,10 @@ function setup(t) {
 }
 const conflict = error => error.status === 409;
 const command = generation => ({ operation_id: randomUUID(), generation });
+
+test('snapshot wire limit covers PHP escaped base64 without raising decoded chunk capacity', () => {
+  assert.equal(SNAPSHOT_CHUNK_BODY_BYTES, (2 * SNAPSHOT_CHUNK_ENCODED_BYTES) + (64 * 1024));
+});
 
 test('create is stopped, caller ID survives restarts, exact retry returns saved result without credentials', async t => {
   const s = setup(t);
@@ -420,6 +424,25 @@ test('snapshot intent survives lost responses and restore rotates identity exact
   await s.send(`machines/${id}/restore`, restore);
   assert.equal(s.api.registry.get(id).registration_token, afterToken);
   assert.equal(restores, 1);
+});
+
+test('fork restore cleanup permits the new computer first boot', async t => {
+  const s = setup(t); const id = s.create.id;
+  await s.send('machines', s.create);
+  const calls = [];
+  s.runtime.storageOperation = async (_id, verb, body) => {
+    calls.push([verb, body]);
+    return { id: body.snapshot_id, status: 'stopped', fork_identity_reset: body.fork === true };
+  };
+  s.runtime.reseed = async () => {};
+  const restore = { ...command(1), snapshot_id: randomUUID(), fork: true };
+  const response = await s.send(`machines/${id}/restore`, restore);
+  assert.equal(response.body.data.fork_identity_reset, true);
+  assert.equal(calls[0][0], 'restore');
+  assert.equal(calls[0][1].fork, true);
+  await s.send(`machines/${id}/snapshot-delete`, { ...command(1), snapshot_id: restore.snapshot_id });
+  assert.equal(calls[1][0], 'snapshot-delete');
+  assert.equal((await s.send(`machines/${id}/start`, command(1))).body.data.status, 'running');
 });
 
 test('storage rejects running snapshots, arbitrary paths, stale generations and oversized chunks', async t => {

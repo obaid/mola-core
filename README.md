@@ -118,8 +118,22 @@ endpoints and reports what the host can do.
 | `POST /v1/machines/{id}/start` | start a stopped computer |
 | `POST /v1/machines/{id}/stop` | shut it down |
 | `POST /v1/machines/{id}/actions` | do something inside it |
+| `POST /v1/machines/{id}/session` | open a persistent low-latency action session |
+| `POST /v1/machines/{id}/tunnels` | reach one allowed loopback port securely |
 | `POST /v1/machines/{id}/desktop` | get a browser URL for the screen |
 | `DELETE /v1/machines/{id}` | destroy it and its disk |
+
+Choose the resources for each computer when you create it:
+
+```json
+{ "name": "lean", "vcpus": 1, "memory_mb": 2048, "disk_gb": 20 }
+```
+
+The supported ranges are 1–8 vCPU, 1024–16384 MB of memory and 16–1024 GB of
+disk. A host can also change the defaults for requests that omit these fields
+with `MOLA_DEFAULT_VCPUS`, `MOLA_DEFAULT_MEMORY_MB` and
+`MOLA_DEFAULT_DISK_GB`. `GET /v1` reports the active values in
+`machine_defaults`.
 
 Nine actions run inside a machine: `exec`, `read_file`, `write_file`,
 `screenshot`, `click`, `move`, `scroll`, `type`, and `key`.
@@ -127,6 +141,11 @@ Nine actions run inside a machine: `exec`, `read_file`, `write_file`,
 Full details in the [API reference](docs/api.md). There is also a
 [Postman collection](postman/) that exercises the whole thing in sixteen
 assertions.
+
+High-frequency clients can keep one ordered action connection open, transfer
+screenshots/files as binary frames, subscribe to changed screen frames, and
+open machine-scoped port tunnels. See the [action-session protocol](docs/action-session.md)
+and the runnable [client examples](examples/README.md).
 
 ## Documentation
 
@@ -139,6 +158,9 @@ in this repository:
 - [Concepts](docs/concepts.md), what a machine is and what its states mean
 - [Troubleshooting](docs/troubleshooting.md), failures you are likely to hit
 - [Development](docs/development.md), working on the engine itself
+- [Action sessions](docs/action-session.md), persistent actions, screen frames and tunnels
+- [Cua Driver](docs/cua.md), native computer-use tools in supported Omarchy images
+- [Performance](docs/performance.md), repeatable transport benchmarks
 
 ## What is in this repository
 
@@ -150,7 +172,7 @@ in this repository:
 | `image/` | guest image builds |
 | `postman/` | a collection covering the whole API |
 
-The published npm package contains `bin/`, `src/`, `runtime/` and `postman/`.
+The published npm package contains `bin/`, `src/`, `runtime`, `postman`, docs and examples.
 The rest are build inputs.
 
 ## Where state lives

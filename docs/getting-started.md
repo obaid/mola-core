@@ -75,7 +75,11 @@ curl -s -X POST $API/machines \
 ```
 
 You get back a machine with `"status": "booting"`. Defaults are 4 vCPU, 4 GB of
-memory and a 40 GB disk; pass `vcpus`, `memory_mb` or `disk_gb` to change them.
+memory and a 40 GB disk; pass `vcpus`, `memory_mb` or `disk_gb` to change one
+machine. To choose smaller defaults for every machine on a constrained host,
+set `MOLA_DEFAULT_VCPUS`, `MOLA_DEFAULT_MEMORY_MB` and optionally
+`MOLA_DEFAULT_DISK_GB` before starting Mola. Explicit values in a create request
+always win.
 
 Save the id:
 
