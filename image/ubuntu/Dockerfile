@@ -33,7 +33,7 @@ RUN printf 'virtio_pci\nvirtio_blk\nvirtio_net\next4\n' >> /etc/initramfs-tools/
     && update-initramfs -u -k all \
     && cp /boot/vmlinuz-* /boot/vmlinuz-linux && cp /boot/initrd.img-* /boot/initramfs-linux.img
 COPY image/ubuntu/rootfs/ /
-ARG MOLA_IMAGE_VERSION=24.04-3
+ARG MOLA_IMAGE_VERSION=24.04-4
 RUN chmod 0755 /usr/local/bin/mola-* /usr/local/bin/cua-driver \
     && ln -sf mola-chrome /usr/local/bin/google-chrome \
     && ln -sf mola-chrome /usr/local/bin/google-chrome-stable \

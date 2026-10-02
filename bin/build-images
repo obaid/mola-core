@@ -8,7 +8,7 @@ root = Path(__file__).resolve().parent.parent
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--guest-only', action='store_true')
 p.add_argument('--desktop', choices=['omarchy', 'ubuntu'], default='omarchy')
-p.add_argument('--image-version', default='24.04-3', help='Immutable Ubuntu base version')
+p.add_argument('--image-version', default='24.04-4', help='Immutable Ubuntu base version')
 a = p.parse_args()
 (root / 'image/omarchy/bin').mkdir(parents=True, exist_ok=True)
 def run(*args): subprocess.run(list(args), cwd=root, check=True)

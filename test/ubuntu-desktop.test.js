@@ -34,3 +34,32 @@ print(json.dumps(tile.windows()))
     width: 717, height: 859, title: 'Terminal',
   }]);
 });
+
+test('Ubuntu tiling waits for restored XFCE decorations before sizing a tile', () => {
+  const helper = join(import.meta.dirname, '../image/ubuntu/rootfs/usr/local/bin/mola-tile');
+  const result = spawnSync('python3', ['-c', String.raw`
+import importlib.util, importlib.machinery, json, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader('tile', sys.argv[1])
+spec = importlib.util.spec_from_loader(loader.name, loader)
+tile = importlib.util.module_from_spec(spec); loader.exec_module(tile)
+calls = []; states = iter(['_NET_WM_STATE_MAXIMIZED_VERT', '', '', ''])
+extents = iter(['0, 0, 24, 0', '5, 5, 29, 5', '5, 5, 29, 5'])
+def command(*args):
+    calls.append(args)
+    if args[0] == 'wmctrl': return ''
+    if args[-1] == '_NET_WM_STATE': return '_NET_WM_STATE(ATOM) = ' + next(states)
+    if args[-1] == '_NET_FRAME_EXTENTS': return '_NET_FRAME_EXTENTS(CARDINAL) = ' + next(extents)
+    raise AssertionError(args)
+tile.command = command; tile.time.sleep = lambda _: None
+print(json.dumps({'extents': tile.restore_decorations('0x1'), 'calls': calls}))
+`, helper], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.extents, [5, 5, 29, 5]);
+  assert.deepEqual(output.calls.slice(0, 3), [
+    ['wmctrl', '-ir', '0x1', '-b', 'remove,maximized_vert,maximized_horz'],
+    ['wmctrl', '-ir', '0x1', '-b', 'remove,fullscreen'],
+    ['xprop', '-id', '0x1', '_NET_WM_STATE'],
+  ]);
+});

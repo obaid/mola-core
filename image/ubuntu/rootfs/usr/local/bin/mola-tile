@@ -54,6 +54,25 @@ def windows():
     return result
 
 
+def restore_decorations(target):
+    command('wmctrl', '-ir', target, '-b', 'remove,maximized_vert,maximized_horz')
+    command('wmctrl', '-ir', target, '-b', 'remove,fullscreen')
+    # Leaving maximized/fullscreen mode changes XFCE's frame extents. Wait for
+    # the state and decorations to settle before computing client dimensions.
+    previous = None
+    for _ in range(20):
+        time.sleep(0.05)
+        state = command('xprop', '-id', target, '_NET_WM_STATE')
+        if any(s in state for s in ['_NET_WM_STATE_MAXIMIZED_', '_NET_WM_STATE_FULLSCREEN']):
+            previous = None
+            continue
+        current = property_values(target, '_NET_FRAME_EXTENTS')
+        if current == previous:
+            return current
+        previous = current
+    raise ValueError('Window decorations did not settle after restoring it')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('layout', choices=['list', 'left', 'right', 'top', 'bottom',
@@ -95,9 +114,7 @@ def main():
                 height -= first
             else:
                 height = first
-        left, right, top, bottom = property_values(target, '_NET_FRAME_EXTENTS')
-        command('wmctrl', '-ir', target, '-b', 'remove,maximized_vert,maximized_horz')
-        command('wmctrl', '-ir', target, '-b', 'remove,fullscreen')
+        left, right, top, bottom = restore_decorations(target)
         # StaticGravity locates the client origin; subtract the decoration size
         # from its dimensions so the full window fits inside the requested tile.
         command('wmctrl', '-ir', target, '-e',

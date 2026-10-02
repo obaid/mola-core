@@ -9,16 +9,16 @@ The hosted create contract remains `/internal/v1/machines`. `image_ref` is an im
 Build on a Docker machine (including an ARM development laptop):
 
 ```sh
-python3 bin/prepare-ubuntu --version 24.04-3 --output /srv/mola/images/ubuntu-24.04-3
+python3 bin/prepare-ubuntu --version 24.04-4 --output /srv/mola/images/ubuntu-24.04-4
 ```
 
 This requires Docker and exports a 16 GiB sparse ext4 base, kernel, initramfs and checksum-verified guest-agent sidecar. The output must be a new directory. Failed/incomplete staging directories are rejected by the runner. The compiled guest agent uses the existing build pipeline. Ubuntu packages and Chrome track security updates at build time: pin each accepted build under a new image ref and retain its artifacts; never rebuild over a ref used by existing machines.
 
-### Shared agent base (24.04-3)
+### Shared agent base (24.04-4)
 
-`bin/prepare-ubuntu --version 24.04-3 --output /srv/mola/images/ubuntu-24.04-3`
-builds both the reusable `mola/ubuntu-base:24.04-3` Docker target and the KVM
-artifact. Ubuntu variants should inherit that base (`FROM mola/ubuntu-base:24.04-3`)
+`bin/prepare-ubuntu --version 24.04-4 --output /srv/mola/images/ubuntu-24.04-4`
+builds both the reusable `mola/ubuntu-base:24.04-4` Docker target and the KVM
+artifact. Ubuntu variants should inherit that base (`FROM mola/ubuntu-base:24.04-4`)
 and add their application packages. Omarchy keeps its own image lineage.
 
 The base includes a clean, unsigned-in Chrome **Default** profile named Mola.
@@ -46,15 +46,15 @@ mola-tile maximize --window 0x01400003
 Without `--window`, the active window is selected. The helper emits JSON with
 the actual reported window geometry. Half and quarter tiles use the current
 desktop's usable work area and account for window decorations. Window minimum
-size hints can prevent very small tiles. This is explicit agent-controlled
+size hints and resize increments can prevent very small tiles. This is explicit agent-controlled
 tiling, rather than an automatic rearrangement whenever a window opens.
 
 On the **Linux x86_64 KVM host**, keep its existing Omarchy installation. Write a private, operator-owned JSON catalog:
 
 ```json
 {
-  "ubuntu-xfce:24.04-3": {
-    "path": "/srv/mola/images/ubuntu-24.04-3",
+  "ubuntu-xfce:24.04-4": {
+    "path": "/srv/mola/images/ubuntu-24.04-4",
     "architecture": "x86_64",
     "kernel_args": "root=/dev/vda rw rootwait console=hvc0 systemd.unit=multi-user.target",
     "gpu": "virtio-gpu-pci",

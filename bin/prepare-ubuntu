@@ -9,7 +9,7 @@ import uuid
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output', type=Path, required=True)
-parser.add_argument('--version', default='24.04-3', help='Immutable Ubuntu base version')
+parser.add_argument('--version', default='24.04-4', help='Immutable Ubuntu base version')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 output = args.output.resolve()
