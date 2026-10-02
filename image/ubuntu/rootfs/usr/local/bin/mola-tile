@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Arrange an XFCE window by ID; emit JSON so agents can verify the result."""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+os.environ.setdefault('DISPLAY', ':1')
+os.environ['LC_ALL'] = 'C'
+
+
+def command(*args):
+    return subprocess.check_output(args, text=True, stderr=subprocess.PIPE)
+
+
+def property_values(window, name):
+    output = command('xprop', '-root', name) if window == 'root' else command('xprop', '-id', window, name)
+    if '=' not in output:
+        raise ValueError('Window manager did not provide ' + name)
+    return [int(n) for n in re.findall(r'-?\d+', output.split('=', 1)[1])]
+
+
+def windows():
+    result = []
+    for line in command('wmctrl', '-lG').splitlines():
+        parts = line.split(None, 7)
+        if len(parts) == 8:
+            try:
+                kind = command('xprop', '-id', parts[0], '_NET_WM_WINDOW_TYPE')
+                if any(t in kind for t in ['_NET_WM_WINDOW_TYPE_DOCK', '_NET_WM_WINDOW_TYPE_DESKTOP']):
+                    continue
+                info = command('xwininfo', '-id', parts[0])
+                def number(label):
+                    match = re.search(r'^\s*' + re.escape(label) + r':\s*(-?\d+)', info, re.MULTILINE)
+                    if not match:
+                        raise ValueError('Missing window geometry')
+                    return int(match[1])
+                try:
+                    left, right, top, bottom = property_values(parts[0], '_NET_FRAME_EXTENTS')
+                except ValueError:
+                    left = right = top = bottom = 0
+                # wmctrl -lG adds frame offsets twice on XFCE. Use X's actual
+                # client position and include decorations in the reported box.
+                result.append(dict(id=parts[0], desktop=int(parts[1]),
+                                   x=number('Absolute upper-left X') - left,
+                                   y=number('Absolute upper-left Y') - top,
+                                   width=number('Width') + left + right,
+                                   height=number('Height') + top + bottom, title=parts[7]))
+            except (ValueError, subprocess.CalledProcessError):
+                continue  # A window may close between listing and inspection.
+    return result
+
+
+def restore_decorations(target):
+    command('wmctrl', '-ir', target, '-b', 'remove,maximized_vert,maximized_horz')
+    command('wmctrl', '-ir', target, '-b', 'remove,fullscreen')
+    # Leaving maximized/fullscreen mode changes XFCE's frame extents. Wait for
+    # the state and decorations to settle before computing client dimensions.
+    previous = None
+    for _ in range(20):
+        time.sleep(0.05)
+        state = command('xprop', '-id', target, '_NET_WM_STATE')
+        if any(s in state for s in ['_NET_WM_STATE_MAXIMIZED_', '_NET_WM_STATE_FULLSCREEN']):
+            previous = None
+            continue
+        current = property_values(target, '_NET_FRAME_EXTENTS')
+        if current == previous:
+            return current
+        previous = current
+    raise ValueError('Window decorations did not settle after restoring it')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('layout', choices=['list', 'left', 'right', 'top', 'bottom',
+                                         'top-left', 'top-right', 'bottom-left', 'bottom-right',
+                                         'maximize'])
+    parser.add_argument('--window', help='Window ID from mola-tile list (default: active window)')
+    args = parser.parse_args()
+    if args.layout == 'list':
+        print(json.dumps({'windows': windows()}))
+        return
+    target = args.window or command('xdotool', 'getactivewindow').strip()
+    if not re.fullmatch(r'(?:0x[0-9a-fA-F]+|[0-9]+)', target):
+        raise ValueError('Expected a nonzero numeric window ID')
+    target = hex(int(target, 16 if target.startswith('0x') else 10))
+    if int(target, 16) == 0:
+        raise ValueError('Expected a nonzero numeric window ID')
+    if not any(int(w['id'], 16) == int(target, 16) for w in windows()):
+        raise ValueError('Window is not managed by XFCE')
+    command('wmctrl', '-ia', target)
+    if args.layout == 'maximize':
+        command('wmctrl', '-ir', target, '-b', 'add,maximized_vert,maximized_horz')
+    else:
+        desktop = property_values('root', '_NET_CURRENT_DESKTOP')[0]
+        areas = property_values('root', '_NET_WORKAREA')
+        x, y, width, height = areas[desktop * 4:desktop * 4 + 4]
+        if width <= 0 or height <= 0:
+            raise ValueError('No usable desktop work area')
+        if 'left' in args.layout or 'right' in args.layout:
+            first = width // 2
+            if 'right' in args.layout:
+                x += first
+                width -= first
+            else:
+                width = first
+        if 'top' in args.layout or 'bottom' in args.layout:
+            first = height // 2
+            if 'bottom' in args.layout:
+                y += first
+                height -= first
+            else:
+                height = first
+        left, right, top, bottom = restore_decorations(target)
+        # StaticGravity locates the client origin; subtract the decoration size
+        # from its dimensions so the full window fits inside the requested tile.
+        command('wmctrl', '-ir', target, '-e',
+                f'10,{x + left},{y + top},{max(1, width - left - right)},{max(1, height - top - bottom)}')
+    # EWMH requests are asynchronous. Wait for stable reported geometry instead
+    # of returning the stale dimensions from before the request.
+    previous = None
+    for _ in range(20):
+        current = next((w for w in windows() if int(w['id'], 16) == int(target, 16)), None)
+        if current is None:
+            raise ValueError('Window closed while arranging it')
+        if current == previous:
+            break
+        previous = current
+        time.sleep(0.05)
+    print(json.dumps({'layout': args.layout, 'window': current}))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, subprocess.CalledProcessError) as error:
+        print(json.dumps({'error': str(error)}), file=sys.stderr)
+        sys.exit(1)

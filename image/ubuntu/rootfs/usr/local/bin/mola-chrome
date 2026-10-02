@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+# Normal per-user Chrome storage remains on the computer's persistent home.
+# Do not share profiles between guests or disable Chrome's sandbox.
+exec /opt/google/chrome/google-chrome \
+    --no-first-run --no-default-browser-check --profile-directory=Default "$@"

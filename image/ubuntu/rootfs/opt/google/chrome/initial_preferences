@@ -1,0 +1,13 @@
+{
+  "distribution": {
+    "skip_first_run_ui": true,
+    "suppress_first_run_default_browser_prompt": true,
+    "suppress_first_run_bubble": true,
+    "import_bookmarks": false,
+    "import_history": false,
+    "import_search_engine": false,
+    "import_home_page": false
+  },
+  "browser": { "check_default_browser": false },
+  "profile": { "name": "Mola", "avatar_index": 0 }
+}
