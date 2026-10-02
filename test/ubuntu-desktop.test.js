@@ -9,6 +9,7 @@ test('Ubuntu tiling reports the real outer window box and excludes desktop panel
   // client is at (725,56), inside a frame whose origin is (720,27).
   const result = spawnSync('python3', ['-c', String.raw`
 import importlib.util, importlib.machinery, json, sys
+sys.dont_write_bytecode = True
 loader = importlib.machinery.SourceFileLoader('tile', sys.argv[1])
 spec = importlib.util.spec_from_loader(loader.name, loader)
 tile = importlib.util.module_from_spec(spec); loader.exec_module(tile)
