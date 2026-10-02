@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0 — 2026-10-02
+
+- Add private Decodo browser-proxy bindings to Ubuntu desktops, with a local
+  authenticated HTTP/CONNECT bridge and managed Chrome policies.
+- Preserve bindings through boot and restore; remove active inherited settings
+  from unbound forks and clear credentials from confirmed destroy tombstones.
+- Keep normal desktop streaming and non-browser egress unchanged.
+
 ## 1.6.0 — 2026-10-02
 
 - Support lightweight Ubuntu 24.04 XFCE desktops alongside the default Omarchy
