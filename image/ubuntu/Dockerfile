@@ -28,8 +28,12 @@ RUN mkdir -p /opt/mola/cua-driver \
 COPY image/omarchy/bin/mola-guest-amd64 /usr/local/bin/mola-guest
 # Reuse the existing persistence, identity, SSH and VNC contract.
 COPY image/docker/rootfs/usr/local/bin/mola-entrypoint /usr/local/bin/mola-entrypoint
+# Kernel preparation is independent of desktop defaults and image version.
+RUN printf 'virtio_pci\nvirtio_blk\nvirtio_net\next4\n' >> /etc/initramfs-tools/modules \
+    && update-initramfs -u -k all \
+    && cp /boot/vmlinuz-* /boot/vmlinuz-linux && cp /boot/initrd.img-* /boot/initramfs-linux.img
 COPY image/ubuntu/rootfs/ /
-ARG MOLA_IMAGE_VERSION=24.04-2
+ARG MOLA_IMAGE_VERSION=24.04-3
 RUN chmod 0755 /usr/local/bin/mola-* /usr/local/bin/cua-driver \
     && ln -sf mola-chrome /usr/local/bin/google-chrome \
     && ln -sf mola-chrome /usr/local/bin/google-chrome-stable \
@@ -40,10 +44,7 @@ RUN chmod 0755 /usr/local/bin/mola-* /usr/local/bin/cua-driver \
     && ln -sf /etc/systemd/system/mola.service /etc/systemd/system/multi-user.target.wants/mola.service \
     && systemctl enable systemd-networkd systemd-resolved \
     && mkdir -p /etc/systemd/network \
-    && printf '[Match]\nName=en* eth*\n[Network]\nDHCP=yes\n' > /etc/systemd/network/20-mola.network \
-    && printf 'virtio_pci\nvirtio_blk\nvirtio_net\next4\n' >> /etc/initramfs-tools/modules \
-    && update-initramfs -u -k all \
-    && cp /boot/vmlinuz-* /boot/vmlinuz-linux && cp /boot/initrd.img-* /boot/initramfs-linux.img
+    && printf '[Match]\nName=en* eth*\n[Network]\nDHCP=yes\n' > /etc/systemd/network/20-mola.network
 
 # The Mola entrypoint owns sshd and persistent host keys; avoid Ubuntu socket activation racing it.
 RUN systemctl disable ssh.service ssh.socket

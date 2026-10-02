@@ -9,6 +9,7 @@ import sys
 import time
 
 os.environ.setdefault('DISPLAY', ':1')
+os.environ['LC_ALL'] = 'C'
 
 
 def command(*args):
@@ -27,9 +28,29 @@ def windows():
     for line in command('wmctrl', '-lG').splitlines():
         parts = line.split(None, 7)
         if len(parts) == 8:
-            result.append(dict(id=parts[0], desktop=int(parts[1]),
-                               x=int(parts[2]), y=int(parts[3]),
-                               width=int(parts[4]), height=int(parts[5]), title=parts[7]))
+            try:
+                kind = command('xprop', '-id', parts[0], '_NET_WM_WINDOW_TYPE')
+                if any(t in kind for t in ['_NET_WM_WINDOW_TYPE_DOCK', '_NET_WM_WINDOW_TYPE_DESKTOP']):
+                    continue
+                info = command('xwininfo', '-id', parts[0])
+                def number(label):
+                    match = re.search(r'^\s*' + re.escape(label) + r':\s*(-?\d+)', info, re.MULTILINE)
+                    if not match:
+                        raise ValueError('Missing window geometry')
+                    return int(match[1])
+                try:
+                    left, right, top, bottom = property_values(parts[0], '_NET_FRAME_EXTENTS')
+                except ValueError:
+                    left = right = top = bottom = 0
+                # wmctrl -lG adds frame offsets twice on XFCE. Use X's actual
+                # client position and include decorations in the reported box.
+                result.append(dict(id=parts[0], desktop=int(parts[1]),
+                                   x=number('Absolute upper-left X') - left,
+                                   y=number('Absolute upper-left Y') - top,
+                                   width=number('Width') + left + right,
+                                   height=number('Height') + top + bottom, title=parts[7]))
+            except (ValueError, subprocess.CalledProcessError):
+                continue  # A window may close between listing and inspection.
     return result
 
 

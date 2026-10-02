@@ -9,16 +9,16 @@ The hosted create contract remains `/internal/v1/machines`. `image_ref` is an im
 Build on a Docker machine (including an ARM development laptop):
 
 ```sh
-python3 bin/prepare-ubuntu --version 24.04-2 --output /srv/mola/images/ubuntu-24.04-2
+python3 bin/prepare-ubuntu --version 24.04-3 --output /srv/mola/images/ubuntu-24.04-3
 ```
 
 This requires Docker and exports a 16 GiB sparse ext4 base, kernel, initramfs and checksum-verified guest-agent sidecar. The output must be a new directory. Failed/incomplete staging directories are rejected by the runner. The compiled guest agent uses the existing build pipeline. Ubuntu packages and Chrome track security updates at build time: pin each accepted build under a new image ref and retain its artifacts; never rebuild over a ref used by existing machines.
 
-### Shared agent base (24.04-2)
+### Shared agent base (24.04-3)
 
-`bin/prepare-ubuntu --version 24.04-2 --output /srv/mola/images/ubuntu-24.04-2`
-builds both the reusable `mola/ubuntu-base:24.04-2` Docker target and the KVM
-artifact. Ubuntu variants should inherit that base (`FROM mola/ubuntu-base:24.04-2`)
+`bin/prepare-ubuntu --version 24.04-3 --output /srv/mola/images/ubuntu-24.04-3`
+builds both the reusable `mola/ubuntu-base:24.04-3` Docker target and the KVM
+artifact. Ubuntu variants should inherit that base (`FROM mola/ubuntu-base:24.04-3`)
 and add their application packages. Omarchy keeps its own image lineage.
 
 The base includes a clean, unsigned-in Chrome **Default** profile named Mola.
@@ -53,8 +53,8 @@ On the **Linux x86_64 KVM host**, keep its existing Omarchy installation. Write 
 
 ```json
 {
-  "ubuntu-xfce:24.04-2": {
-    "path": "/srv/mola/images/ubuntu-24.04-2",
+  "ubuntu-xfce:24.04-3": {
+    "path": "/srv/mola/images/ubuntu-24.04-3",
     "architecture": "x86_64",
     "kernel_args": "root=/dev/vda rw rootwait console=hvc0 systemd.unit=multi-user.target",
     "gpu": "virtio-gpu-pci",
