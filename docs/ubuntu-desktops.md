@@ -6,7 +6,10 @@ The hosted create contract remains `/internal/v1/machines`. `image_ref` is an im
 
 ## Build and install
 
-Build on a Docker machine (including an ARM development laptop):
+Build from the matching mola-core repository checkout on a Docker machine
+(including an ARM development laptop). Image recipes and the Go guest source
+are not bundled in the npm package; installing or updating npm does not install
+this Ubuntu image:
 
 ```sh
 python3 bin/prepare-ubuntu --version 24.04-4 --output /srv/mola/images/ubuntu-24.04-4
