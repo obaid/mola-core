@@ -103,12 +103,22 @@ class Runner:
         self.accel = accelerator(platform.system(), platform.machine(), self.arch)
         self.qemu = Path(self.config['qemu']).resolve()
         self.image = Path(self.config['image']).resolve()
-        if any((self.image / marker).exists() for marker in ['STAGING_INCOMPLETE', 'STAGING_FAILED']):
-            raise ValueError('Refusing an incomplete or failed prepared image')
-        for path in [self.qemu, self.image, self.root]:
-            if ',' in str(path) or '\n' in str(path): raise ValueError('QEMU paths cannot contain commas or newlines')
-        for name in ['root.ext4', 'vmlinuz-linux', 'initramfs-linux.img']:
-            if not (self.image / name).is_file(): raise ValueError('Missing prepared image artifact: ' + name)
+        self.default_image_ref = self.config.get('default_image_ref', 'omarchy-agent:0.1.0')
+        self.images = {self.default_image_ref: {
+            'path': str(self.image), 'architecture': self.arch,
+            'kernel_args': self.config['kernel_args'], 'gpu': self.config['gpu'], 'display': self.config['display'],
+        }, **self.config.get('images', {})}
+        for image in self.images.values():
+            if image.get('architecture') != self.arch:
+                raise ValueError('Installed image architecture does not match this host')
+            directory = Path(image['path']).resolve()
+            if not Path(image['path']).is_absolute(): raise ValueError('Image path must be absolute')
+            if any((directory / marker).exists() for marker in ['STAGING_INCOMPLETE', 'STAGING_FAILED']):
+                raise ValueError('Refusing an incomplete or failed prepared image')
+            for path in [self.qemu, directory, self.root]:
+                if ',' in str(path) or '\n' in str(path): raise ValueError('QEMU paths cannot contain commas or newlines')
+            for name in ['root.ext4', 'vmlinuz-linux', 'initramfs-linux.img']:
+                if not (directory / name).is_file(): raise ValueError('Missing prepared image artifact: ' + name)
         if self.accel == 'kvm' and not os.access('/dev/kvm', os.R_OK | os.W_OK):
             raise ValueError('Linux requires usable /dev/kvm')
         capabilities = subprocess.check_output([str(self.qemu), '-accel', 'help'], text=True)
@@ -129,6 +139,15 @@ class Runner:
         self.machine_locks = {}
         self.machine_locks_guard = threading.Lock()
         self.processes = {}
+
+    def selected_image(self, data):
+        ref = data.get('image_ref', getattr(self, 'default_image_ref', 'omarchy-agent:0.1.0'))
+        # Old persisted machines predate the catalog and remain on the default.
+        if not hasattr(self, 'images'):
+            return {'path': str(self.image), 'kernel_args': self.config.get('kernel_args'),
+                    'gpu': self.config.get('gpu'), 'display': self.config.get('display')}
+        if ref not in self.images: raise ValueError('Machine image is not installed on this host')
+        return self.images[ref]
 
     @staticmethod
     def socket_directory(root, system):
@@ -255,10 +274,14 @@ class Runner:
                 raise ValueError('Machine ID already holds a different create specification')
             return self.describe(identifier)
         if folder.exists(): raise ValueError('Incomplete machine directory; inspect it before retrying')
+        image = self.selected_image(spec)
+        image_path = Path(image['path'])
         cpus, memory, disk_gb = spec['vcpus'], spec['memory_mb'], spec['disk_gb']
         if not all(type(n) is int for n in [cpus, memory, disk_gb]): raise ValueError('Resources must be integers')
         if not (1 <= cpus <= (8 if self.arch == 'aarch64' else 32) and 1024 <= memory <= self.config.get('max_memory_mb', 8192) and 16 <= disk_gb <= 1024):
             raise ValueError('Requested resources exceed native runner limits')
+        if (image_path / 'root.ext4').stat().st_size > disk_gb * 1024**3:
+            raise ValueError('Requested disk is smaller than the installed image')
         keys = spec.get('authorized_keys', [])
         if not isinstance(keys, list) or any(not isinstance(key, str) or len(key) > 16384 for key in keys):
             raise ValueError('Invalid authorized keys')
@@ -298,13 +321,16 @@ class Runner:
         write_json(folder / 'intent.json', {'fingerprint': fingerprint})
         disk = folder / 'root.ext4'
         if platform.system() == 'Darwin':
-            subprocess.run(['cp', '-c', str(self.image / 'root.ext4'), str(disk)], check=True)
+            subprocess.run(['cp', '-c', str(image_path / 'root.ext4'), str(disk)], check=True)
+        elif platform.system() == 'Linux':
+            # Reflink where supported; otherwise retain a sparse independent copy.
+            subprocess.run(['cp', '--reflink=auto', '--sparse=always', str(image_path / 'root.ext4'), str(disk)], check=True)
         else:
             # Copy in sparse blocks to avoid allocating the image's free space.
             if platform.system() == 'Windows':
                 disk.touch()
                 subprocess.run(['fsutil', 'sparse', 'setflag', str(disk)], check=True, stdout=subprocess.DEVNULL)
-            with (self.image / 'root.ext4').open('rb') as source, disk.open('wb') as target:
+            with (image_path / 'root.ext4').open('rb') as source, disk.open('wb') as target:
                 for chunk in iter(lambda: source.read(1024 * 1024), b''):
                     if chunk.strip(b'\0'): target.write(chunk)
                     else: target.seek(len(chunk), 1)
@@ -315,12 +341,15 @@ class Runner:
         while len(ports) < 3: ports.add(free_port())
         ssh_port, vnc_port, qmp_port = sorted(ports)
         data = {'managed_by': 'mola-native-v1', 'id': identifier, 'vcpus': cpus, 'memory_mb': memory,
-                'ssh_port': ssh_port, 'vnc_port': vnc_port, 'qmp_port': qmp_port, 'create_fingerprint': fingerprint}
+                'ssh_port': ssh_port, 'vnc_port': vnc_port, 'qmp_port': qmp_port, 'create_fingerprint': fingerprint,
+                'image_ref': spec.get('image_ref', getattr(self, 'default_image_ref', 'omarchy-agent:0.1.0'))}
         write_json(folder / 'machine.json', data)
         folder.rename(destination)
         return self.describe(identifier)
 
     def command(self, data):
+        image = self.selected_image(data)
+        image_path = Path(image['path'])
         folder = self.folder(data['id'])
         if self.arch == 'aarch64':
             # GICv2 is what the packaged runtime supports; stock QEMU on HVF
@@ -333,12 +362,12 @@ class Runner:
         qmp = ('tcp:127.0.0.1:' + str(data['qmp_port'])) if platform.system() == 'Windows' else 'unix:' + str(self.sockets / (data['id'] + '.sock'))
         args = [str(self.qemu), '-name', 'mola-' + data['id'], '-machine', machine, '-cpu', cpu,
                 '-smp', str(data['vcpus']), '-m', str(data['memory_mb']), '-nodefaults',
-                '-kernel', str(self.image / 'vmlinuz-linux'), '-initrd', str(self.image / 'initramfs-linux.img'),
-                '-append', self.config['kernel_args'], '-qmp', qmp + ',server=on,wait=off',
+                '-kernel', str(image_path / 'vmlinuz-linux'), '-initrd', str(image_path / 'initramfs-linux.img'),
+                '-append', image['kernel_args'], '-qmp', qmp + ',server=on,wait=off',
                 '-drive', f'file={folder / "root.ext4"},if=none,id=root,format=raw', '-device', 'virtio-blk-pci,drive=root',
                 '-drive', f'file={folder / "identity.img"},if=none,id=identity,format=raw,readonly=on', '-device', 'virtio-blk-pci,drive=identity',
                 '-netdev', f'user,id=net,hostfwd=tcp:127.0.0.1:{data["ssh_port"]}-:22,hostfwd=tcp:127.0.0.1:{data["vnc_port"]}-:5900',
-                '-device', 'virtio-net-pci,netdev=net,romfile=', '-device', self.config['gpu'], '-display', self.config['display'],
+                '-device', 'virtio-net-pci,netdev=net,romfile=', '-device', image['gpu'], '-display', image['display'],
                 '-device', 'virtio-keyboard-pci', '-device', 'virtio-tablet-pci', '-device', 'virtio-serial-pci',
                 '-chardev', f'file,id=console,path={folder / "console.log"}', '-device', 'virtconsole,chardev=console',
                 '-serial', 'none', '-monitor', 'none']
@@ -467,6 +496,7 @@ class Runner:
             raw.flush(); os.fsync(raw.fileno())
         target.replace(folder / 'disk.gz')
         manifest = {'id': snapshot_id, 'format': 'mola-raw-gzip-v1', 'architecture': self.arch,
+                    'image_ref': self.metadata(identifier).get('image_ref', getattr(self, 'default_image_ref', 'omarchy-agent:0.1.0')),
                     'size_bytes': source.stat().st_size, 'sha256': digest.hexdigest(),
                     'artifact_bytes': (folder / 'disk.gz').stat().st_size,
                     'artifact_sha256': self.file_digest(folder / 'disk.gz'), 'created_at': int(time.time())}
@@ -507,7 +537,7 @@ class Runner:
                 # after credential rotation. Verify original snapshot bytes
                 # first, then refresh only the operator-managed guest agent.
                 subprocess.run(['python3', str(Path(__file__).with_name('refresh_guest_agent.py')),
-                                '--image', str(self.image), '--disk', str(temporary), '--architecture', self.arch],
+                                '--image', self.selected_image(self.metadata(identifier))['path'], '--disk', str(temporary), '--architecture', self.arch],
                                check=True, capture_output=True, timeout=900)
                 with temporary.open('rb') as stream: os.fsync(stream.fileno())
             if payload.get('fork', False):
@@ -531,6 +561,9 @@ class Runner:
 
     def validate_snapshot_manifest(self, identifier, manifest):
         if not isinstance(manifest, dict): raise ValueError('Invalid snapshot manifest')
+        expected_image = self.metadata(identifier).get('image_ref', getattr(self, 'default_image_ref', 'omarchy-agent:0.1.0'))
+        snapshot_image = manifest.get('image_ref', getattr(self, 'default_image_ref', 'omarchy-agent:0.1.0'))
+        if snapshot_image != expected_image: raise ValueError('Snapshot image does not match this machine')
         if manifest.get('format') != 'mola-raw-gzip-v1' or manifest.get('architecture') != self.arch:
             raise ValueError('Snapshot format or architecture mismatch')
         limit = (self.folder(identifier) / 'root.ext4').stat().st_size

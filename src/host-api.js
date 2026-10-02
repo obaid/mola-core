@@ -7,6 +7,7 @@ import { handleSsh, revokeSsh } from './ssh.js';
 import { CuaSessions, revokeCua } from './cua.js';
 import { storageOperation, STORAGE_VERBS } from './host-storage.js';
 import { revokeDataPlane } from './data-plane.js';
+import { installedImages } from './installed-images.js';
 
 const fail = (status, message, code) => { throw Object.assign(new Error(message), { status, code }); };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -56,10 +57,13 @@ export function hostDescription(record, runtime, settledOperationKey = null) {
  * Tombstones and results are retained to fence delayed messages after deletion.
  */
 export class HostApi {
-  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', desktop, action, session, tunnel, snapshotTransfer = null, cua = new CuaSessions() }) {
+  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', images = installedImages(), desktop, action, session, tunnel, snapshotTransfer = null, cua = new CuaSessions() }) {
     Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, session, tunnel, snapshotTransfer, cua });
     this.locks = new Map();
+    this.images = images;
   }
+
+  hasImage(ref) { return typeof ref === 'string' && (ref === this.imageRef || Object.hasOwn(this.images, ref)); }
 
   async locked(id, work) {
     const previous = this.locks.get(id) || Promise.resolve();
@@ -91,6 +95,9 @@ export class HostApi {
     if (!authorised(request, this.token)) fail(401, 'Unauthenticated.');
     if (request.headers.origin) fail(403, 'Browser origins are not accepted.');
     const method = request.method;
+    if (method === 'GET' && parts.length === 1 && parts[0] === 'images') {
+      return { status: 200, body: { data: [...new Set([this.imageRef, ...Object.keys(this.images)])].map(image_ref => ({ image_ref })) } };
+    }
     if (parts[0] !== 'machines') fail(404, 'Not found.');
     if (method === 'GET' && parts.length === 1) {
       const records = this.registry.all().filter(record => record.cloud && !record.cloud.deleted);
@@ -219,7 +226,7 @@ export class HostApi {
       if (existing.result) return existing.result;
       if (body.generation !== record.cloud.generation) fail(409, 'Pending operation was superseded.');
     } else {
-      if (verb === 'create' && body.image_ref !== this.imageRef) fail(409, 'Requested image is not installed on this host.');
+      if (verb === 'create' && !this.hasImage(body.image_ref)) fail(409, 'Requested image is not installed on this host.');
       if (record && !record.cloud) fail(409, 'ID belongs to a local machine.');
       let reincarnating = false;
       if (verb === 'create' && record) {
@@ -268,7 +275,7 @@ export class HostApi {
           id, ...spec, created_at: new Date().toISOString(), registration_token: randomUUID().replaceAll('-', ''),
           authorized_keys: [this.publicKey], machine_token_hash: null, boot_id: null,
           capabilities: null, last_heartbeat_at: null, desired_state: 'stopped',
-          cloud: { image_ref: body.image_ref, operations: previousOperations, create_spec: spec,
+          cloud: { image_ref: body.image_ref, operations: previousOperations, create_spec: { ...spec, image_ref: body.image_ref },
             ...(reincarnating ? { incarnation_generation: body.generation } : {}) },
         };
         this.registry.records[id] = record;
@@ -281,7 +288,7 @@ export class HostApi {
     const operation = record.cloud.operations[key];
     if (verb !== 'create') { revokeDesktop(id); revokeSsh(id); revokeDataPlane(id); revokeCua(id); }
     if (verb === 'create') {
-      if (record.cloud.image_ref !== this.imageRef) fail(409, 'Pending create requires its original installed image.');
+      if (!this.hasImage(record.cloud.image_ref)) fail(409, 'Pending create requires its original installed image.');
       await this.runtime.create({ computer_id: id, ...record.cloud.create_spec,
         registration_token: record.registration_token, authorized_keys: record.authorized_keys });
     } else if (verb === 'start') {

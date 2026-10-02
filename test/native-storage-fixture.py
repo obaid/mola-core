@@ -89,6 +89,7 @@ with tempfile.TemporaryDirectory() as temp:
     target.reseed(ID, {'name': 'migrated', 'registration_token': 'new-secret', 'authorized_keys': ['ssh-ed25519 example']})
     assert b'new-secret' in (target.folder(ID) / 'identity.img').read_bytes()
     rejects(lambda: target.import_snapshot(ID, dict(payload, manifest=dict(manifest, size_bytes=10**12))), 'oversized disk accepted')
+    rejects(lambda: target.import_snapshot(ID, dict(payload, manifest=dict(manifest, image_ref='ubuntu-xfce:24.04-1'))), 'cross-image snapshot accepted')
     rejects(lambda: target.storage_path(ID, '../../root'), 'path traversal accepted')
     receipt = source.fence(ID, {})
     assert receipt['fenced'] is True and receipt['status'] == 'stopped'

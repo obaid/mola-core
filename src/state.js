@@ -37,7 +37,7 @@ export class Registry {
     return this.records[id] ?? null;
   }
 
-  create({ name, vcpus, memory_mb, disk_gb }) {
+  create({ name, vcpus, memory_mb, disk_gb, image_ref }) {
     const id = randomUUID();
     this.records[id] = {
       id,
@@ -45,6 +45,7 @@ export class Registry {
       vcpus,
       memory_mb,
       disk_gb,
+      ...(image_ref ? { image_ref } : {}),
       created_at: new Date().toISOString(),
       registration_token: randomUUID().replace(/-/g, ''),
       machine_token_hash: null,

@@ -3,7 +3,7 @@ import { Registry } from './state.js';
 import { Runtime } from './runtime.js';
 import { GuestService } from './guest.js';
 import { closeAutomation, runAction } from './automation.js';
-import { operatorToken, authorised, present, defaultResources, validateSpec, validateAction } from './api.js';
+import { operatorToken, authorised, present, defaultResources, validateLocalSpec, validateAction } from './api.js';
 import { desktopPage, attachDesktop, mintTicket, serveNovnc } from './desktop.js';
 import { guestKey } from './keys.js';
 import { HostApi, hostToken } from './host-api.js';
@@ -198,11 +198,11 @@ export async function createServer({ host, port, registry = new Registry(), runt
       }
 
       if (method === 'POST' && parts.length === 2) {
-        const spec = validateSpec(await readBody(request));
+        const spec = validateLocalSpec(await readBody(request), hostApi.images, hostApi.imageRef);
         const record = registry.create(spec);
         registry.update(record.id, { authorized_keys: [keys.publicKey] });
         try {
-          // Every machine is a fresh Omarchy: the runtime clones the base image
+          // Every machine gets a fresh clone of its selected image
           // rather than reviving anything a previous machine left behind.
           await runtime.create({
             computer_id: record.id,
@@ -210,6 +210,7 @@ export async function createServer({ host, port, registry = new Registry(), runt
             vcpus: record.vcpus,
             memory_mb: record.memory_mb,
             disk_gb: record.disk_gb,
+            ...(record.image_ref ? { image_ref: record.image_ref } : {}),
             registration_token: record.registration_token,
             authorized_keys: [keys.publicKey],
           });

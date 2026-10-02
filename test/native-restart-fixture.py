@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(dir='/tmp', prefix='mola-qmp-') as temp:
     image = root / 'image'; image.mkdir()
     for name in ['root.ext4', 'vmlinuz-linux', 'initramfs-linux.img']: (image / name).touch()
     config = root / 'config.json'
-    config.write_text(json.dumps({'architecture': 'x86_64', 'qemu': str(root / 'qemu'), 'image': str(image)}))
+    config.write_text(json.dumps({'architecture': 'x86_64', 'qemu': str(root / 'qemu'), 'image': str(image), 'kernel_args': 'root=/dev/vda rw', 'gpu': 'virtio-gpu-pci', 'display': 'none'}))
     with patch.object(m.platform, 'system', return_value='Linux'), patch.object(m.platform, 'machine', return_value='x86_64'), patch.object(m.os, 'access', return_value=True), patch.object(m.subprocess, 'check_output', return_value='kvm'):
         first = m.Runner(config)
         assert first.sockets == root / 'sockets', 'Linux QMP socket must survive PrivateTmp replacement'

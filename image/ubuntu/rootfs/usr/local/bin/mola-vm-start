@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+mkdir -p /run/mola-bootstrap
+mount -o ro /dev/vdb /run/mola-bootstrap
+set -a
+source /etc/mola/ubuntu.env
+source /run/mola-bootstrap/identity.env
+set +a
+resize2fs /dev/vda
+loginctl enable-linger dev
+systemctl start user@1000.service
+exec /usr/local/bin/mola-entrypoint

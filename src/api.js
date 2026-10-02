@@ -1,3 +1,4 @@
+import { installedImages } from './installed-images.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { statePath } from './paths.js';
@@ -48,6 +49,7 @@ export function present(record, described) {
     vcpus: record.vcpus,
     memory_mb: record.memory_mb,
     disk_gb: record.disk_gb,
+    image_ref: record.cloud?.image_ref ?? record.image_ref ?? process.env.MOLA_IMAGE_REF ?? 'omarchy-agent:0.1.0',
     created_at: record.created_at,
     capabilities: record.capabilities,
     last_heartbeat_at: record.last_heartbeat_at,
@@ -79,6 +81,16 @@ export function validateSpec(body) {
   if (memory_mb < 1024 || memory_mb > 16384) throw new Error('memory_mb must be between 1024 and 16384.');
   if (disk_gb < 16 || disk_gb > 1024) throw new Error('disk_gb must be between 16 and 1024.');
   return { name, vcpus, memory_mb, disk_gb };
+}
+
+export function validateLocalSpec(body, images = installedImages(), defaultRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0') {
+  if (!Object.hasOwn(body, 'image_ref')) return validateSpec(body);
+  const ref = body.image_ref;
+  if (typeof ref !== 'string' || (ref !== defaultRef && !Object.hasOwn(images, ref))) {
+    throw new Error('Requested image is not installed on this host.');
+  }
+  const defaults = images[ref]?.default_resources || {};
+  return { ...validateSpec({ ...defaults, ...body }), image_ref: ref };
 }
 
 export function validateAction(body) {
