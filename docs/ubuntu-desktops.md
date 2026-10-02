@@ -9,17 +9,52 @@ The hosted create contract remains `/internal/v1/machines`. `image_ref` is an im
 Build on a Docker machine (including an ARM development laptop):
 
 ```sh
-python3 bin/prepare-ubuntu --output /srv/mola/images/ubuntu-24.04-1
+python3 bin/prepare-ubuntu --version 24.04-2 --output /srv/mola/images/ubuntu-24.04-2
 ```
 
 This requires Docker and exports a 16 GiB sparse ext4 base, kernel, initramfs and checksum-verified guest-agent sidecar. The output must be a new directory. Failed/incomplete staging directories are rejected by the runner. The compiled guest agent uses the existing build pipeline. Ubuntu packages and Chrome track security updates at build time: pin each accepted build under a new image ref and retain its artifacts; never rebuild over a ref used by existing machines.
+
+### Shared agent base (24.04-2)
+
+`bin/prepare-ubuntu --version 24.04-2 --output /srv/mola/images/ubuntu-24.04-2`
+builds both the reusable `mola/ubuntu-base:24.04-2` Docker target and the KVM
+artifact. Ubuntu variants should inherit that base (`FROM mola/ubuntu-base:24.04-2`)
+and add their application packages. Omarchy keeps its own image lineage.
+
+The base includes a clean, unsigned-in Chrome **Default** profile named Mola.
+`google-chrome`, `google-chrome-stable`, `mola-chrome`, and the desktop launcher
+open that profile without the first-run UI or startup profile picker. Its data
+lives in the individual computer's persistent `~/.config/google-chrome`; no
+cookies, account credentials or device identity are baked into the base. Home
+seeding remains additive and never replaces a saved user profile. Chrome's
+sandbox remains enabled. The startup picker is disabled using Chrome's
+[documented managed policy](https://chromeenterprise.google/policies/profile-picker-on-startup-availability/).
+
+XFCE's window manager provides keyboard tiling with Super + Left/Right/Up/Down,
+quarter tiles with Super + keypad 7/9/1/3, and maximize with Super + M. Custom
+user bindings are preserved. Agents can also arrange a specific window without
+depending on keyboard focus or a particular shortcut mapping:
+
+```sh
+mola-tile list
+mola-tile left --window 0x01200003
+mola-tile right --window 0x01400003
+mola-tile top-right --window 0x01400003
+mola-tile maximize --window 0x01400003
+```
+
+Without `--window`, the active window is selected. The helper emits JSON with
+the actual reported window geometry. Half and quarter tiles use the current
+desktop's usable work area and account for window decorations. Window minimum
+size hints can prevent very small tiles. This is explicit agent-controlled
+tiling, rather than an automatic rearrangement whenever a window opens.
 
 On the **Linux x86_64 KVM host**, keep its existing Omarchy installation. Write a private, operator-owned JSON catalog:
 
 ```json
 {
-  "ubuntu-xfce:24.04-1": {
-    "path": "/srv/mola/images/ubuntu-24.04-1",
+  "ubuntu-xfce:24.04-2": {
+    "path": "/srv/mola/images/ubuntu-24.04-2",
     "architecture": "x86_64",
     "kernel_args": "root=/dev/vda rw rootwait console=hvc0 systemd.unit=multi-user.target",
     "gpu": "virtio-gpu-pci",

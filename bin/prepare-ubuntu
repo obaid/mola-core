@@ -9,6 +9,7 @@ import uuid
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--version', default='24.04-2', help='Immutable Ubuntu base version')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 output = args.output.resolve()
@@ -17,7 +18,7 @@ marker = output / 'STAGING_INCOMPLETE'
 marker.touch()
 def run(*command): subprocess.run(command, cwd=root, check=True)
 try:
-    run('python3', str(root / 'bin/build-images'), '--desktop', 'ubuntu', '--guest-only')
+    run('python3', str(root / 'bin/build-images'), '--desktop', 'ubuntu', '--image-version', args.version, '--guest-only')
     name = 'mola-export-ubuntu-' + uuid.uuid4().hex[:12]
     run('docker', 'create', '--name', name, 'mola/ubuntu-kvm:local')
     try: run('docker', 'cp', name + ':/opt/mola/.', str(output))
@@ -29,7 +30,7 @@ try:
     with guest.open('rb') as stream: digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     (output / 'guest-agent.json').write_text(json.dumps({
         'schema': 1, 'file': 'mola-guest', 'architecture': 'x86_64',
-        'version': '24.04-1', 'sha256': digest,
+        'version': args.version, 'sha256': digest,
     }, indent=2) + '\n')
     marker.unlink()
     print('Prepared Ubuntu x86_64 image: ' + str(output))

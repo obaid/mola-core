@@ -5,5 +5,17 @@ export XDG_RUNTIME_DIR=/run/user/1000
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 mkdir -p "$HOME/.mola/logs"
 xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false || true
+# Add predictable tiling shortcuts without overwriting user customizations.
+for binding in 'Left:tile_left_key' 'Right:tile_right_key' \
+    'Up:tile_up_key' 'Down:tile_down_key' 'm:maximize_window_key' \
+    'KP_7:tile_up_left_key' 'KP_9:tile_up_right_key' \
+    'KP_1:tile_down_left_key' 'KP_3:tile_down_right_key'; do
+    key="${binding%%:*}"
+    action="${binding#*:}"
+    property="/xfwm4/custom/<Super>${key}"
+    if ! xfconf-query -c xfce4-keyboard-shortcuts -p "$property" >/dev/null 2>&1; then
+        xfconf-query -c xfce4-keyboard-shortcuts -p "$property" -n -t string -s "$action" || true
+    fi
+done
 /usr/local/bin/cua-driver serve >> "$HOME/.mola/logs/cua-driver.log" 2>&1 &
 exec startxfce4
