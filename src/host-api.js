@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { statePath } from './paths.js';
 import { authorised, validateSpec, validateAction } from './api.js';
@@ -8,6 +8,7 @@ import { CuaSessions, revokeCua } from './cua.js';
 import { storageOperation, STORAGE_VERBS } from './host-storage.js';
 import { revokeDataPlane } from './data-plane.js';
 import { installedImages } from './installed-images.js';
+import { validateBrowserProxy } from './browser-proxy.js';
 
 const fail = (status, message, code) => { throw Object.assign(new Error(message), { status, code }); };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -203,7 +204,7 @@ export class HostApi {
     if (!Number.isSafeInteger(body.generation) || body.generation < 1) fail(400, 'generation must be a positive integer.');
     if (typeof body.operation_id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.operation_id)) fail(400, 'operation_id is required (letters, numbers, underscores or hyphens; maximum 128).');
     const allowed = verb === 'create'
-      ? ['id', 'name', 'vcpus', 'memory_mb', 'disk_gb', 'image_ref', 'operation_id', 'generation', 'recreate']
+      ? ['id', 'name', 'vcpus', 'memory_mb', 'disk_gb', 'image_ref', 'operation_id', 'generation', 'recreate', 'browser_proxy']
       : ['operation_id', 'generation', ...(verb === 'destroy' ? ['delete_disk'] : [])];
     if (Object.keys(body).some(key => !allowed.includes(key))) fail(400, 'Unknown operation field.');
     if (verb === 'create' && Object.hasOwn(body, 'recreate') && typeof body.recreate !== 'boolean') fail(400, 'recreate must be a boolean.');
@@ -212,8 +213,16 @@ export class HostApi {
     if (verb === 'create') {
       if (!['vcpus', 'memory_mb', 'disk_gb'].every(key => Number.isInteger(body[key])) || typeof body.name !== 'string' || !body.name.trim()) fail(400, 'A name and integer resource sizes are required.');
       try { spec = validateSpec(body); } catch (error) { fail(400, error.message); }
+      try {
+        const proxy = validateBrowserProxy(body.browser_proxy, body.image_ref);
+        if (proxy) spec.browser_proxy = proxy;
+      } catch (error) { fail(400, error.message); }
     }
-    const fingerprint = canonical(body);
+    // Keep secrets out of the operation journal, while detecting retries that
+    // change any nested proxy field. The private create spec is mode 0600.
+    const fingerprint = canonical({ ...body, ...(Object.hasOwn(body, 'browser_proxy') ? {
+      browser_proxy: createHash('sha256').update(JSON.stringify(spec?.browser_proxy ?? null)).digest('hex'),
+    } : {}) });
     const key = `${verb}:${body.operation_id}`;
     let record = this.registry.get(id);
     // An ID reused after confirmed disk deletion is a new incarnation. Old
@@ -333,6 +342,8 @@ export class HostApi {
       await this.runtime.settle(id, { strict: true });
       await this.runtime.destroy(id, body.delete_disk);
       record.cloud.deleted = true;
+      delete record.browser_proxy;
+      delete record.cloud.create_spec?.browser_proxy;
       record.registration_token = null;
       record.machine_token_hash = null;
     }

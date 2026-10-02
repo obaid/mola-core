@@ -34,6 +34,37 @@ function setup(t) {
 const conflict = error => error.status === 409;
 const command = generation => ({ operation_id: randomUUID(), generation });
 
+test('private Ubuntu proxy binding survives retry and restart without leaking authentication', async t => {
+  const s = setup(t);
+  s.api.images = { 'ubuntu-xfce:24.04-4': {} };
+  const body = { ...s.create, image_ref: 'ubuntu-xfce:24.04-4', browser_proxy: {
+    provider: 'decodo', host: 'gate.decodo.com', port: 7000, username: 'test-user-country-us', password: 'private-test-password',
+  } };
+  const result = await s.send('machines', body);
+  assert.equal(s.calls[0][1].browser_proxy.password, 'private-test-password');
+  assert.doesNotMatch(JSON.stringify(result), /private-test-password|test-user-country-us/);
+  const persisted = JSON.parse(readFileSync(s.file, 'utf8'))[body.id];
+  assert.doesNotMatch(JSON.stringify(persisted.cloud.operations), /private-test-password|test-user-country-us/);
+  s.reload();
+  assert.deepEqual(await s.send('machines', body), result);
+  for (const field of ['password', 'username', 'host', 'port']) {
+    await assert.rejects(s.send('machines', { ...body, browser_proxy: { ...body.browser_proxy,
+      [field]: field === 'port' ? 7002 : field === 'host' ? 'us.decodo.com' : 'different-value',
+    } }), conflict);
+  }
+});
+
+test('proxy credentials are rejected for Omarchy and arbitrary upstream hosts', async t => {
+  const s = setup(t);
+  const proxy = { provider: 'decodo', host: 'gate.decodo.com', port: 7000, username: 'demo', password: 'demo' };
+  await assert.rejects(s.send('machines', { ...s.create, browser_proxy: proxy }), e => e.status === 400);
+  s.api.images = { 'ubuntu-xfce:24.04-4': {} };
+  for (const host of ['127.0.0.1', 'example.com', 'gate.decodo.com.evil.com', 'gate.decodo.com/']) {
+    await assert.rejects(s.send('machines', { ...s.create, image_ref: 'ubuntu-xfce:24.04-4', browser_proxy: { ...proxy, host } }), e => e.status === 400);
+  }
+  assert.equal(s.calls.length, 0);
+});
+
 test('snapshot wire limit covers PHP escaped base64 without raising decoded chunk capacity', () => {
   assert.equal(SNAPSHOT_CHUNK_BODY_BYTES, (2 * SNAPSHOT_CHUNK_ENCODED_BYTES) + (64 * 1024));
 });
@@ -600,4 +631,35 @@ test('pending Ubuntu create survives restart with its original image and credent
   s.runtime.create = create;
   await s.send('machines', body);
   assert.deepEqual(s.calls[0][1], s.calls[1][1]);
+});
+
+
+test('confirmed destroy clears private proxy credentials while uncertain destroy preserves retry intent', async t => {
+  const s = setup(t);
+  s.api.images = { 'ubuntu-xfce:24.04-1': {} };
+  const binding = { provider: 'decodo', host: 'gate.decodo.com', port: 7000, username: 'fixture-country-us', password: 'private-proxy-secret' };
+  await s.send('machines', { ...s.create, image_ref: 'ubuntu-xfce:24.04-1', browser_proxy: binding });
+  const destroy = s.runtime.destroy;
+  s.runtime.destroy = async () => { throw new Error('uncertain destroy'); };
+  const operation = { ...command(1), delete_disk: true };
+  await assert.rejects(s.send(`machines/${s.create.id}/destroy`, operation), /uncertain destroy/);
+  assert.match(readFileSync(s.file, 'utf8'), /private-proxy-secret/);
+  s.runtime.destroy = destroy;
+  await s.send(`machines/${s.create.id}/destroy`, operation);
+  assert.doesNotMatch(readFileSync(s.file, 'utf8'), /private-proxy-secret|fixture-country-us/);
+  s.reload();
+  assert.equal((await s.send(`machines/${s.create.id}/destroy`, operation)).body.data.deleted, true);
+});
+
+
+test('restores reapply the destination proxy binding or explicitly remove an inherited one', async t => {
+  for (const proxy of [null, { provider: 'decodo', host: 'us.decodo.com', port: 10000, username: 'fixture', password: 'private' }]) {
+    const s = setup(t); s.api.images = { 'ubuntu-xfce:24.04-4': {} };
+    await s.send('machines', { ...s.create, image_ref: 'ubuntu-xfce:24.04-4', ...(proxy ? { browser_proxy: proxy } : {}) });
+    let seeded;
+    s.runtime.storageOperation = async () => ({ status: 'stopped' });
+    s.runtime.reseed = async (_id, payload) => { seeded = payload; };
+    await s.send(`machines/${s.create.id}/restore`, { ...command(1), snapshot_id: randomUUID() });
+    assert.deepEqual(seeded.browser_proxy, proxy);
+  }
 });

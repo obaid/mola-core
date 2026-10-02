@@ -336,6 +336,10 @@ class Runner:
                     else: target.seek(len(chunk), 1)
                 target.truncate()
         with disk.open('r+b') as stream: stream.truncate(max(disk.stat().st_size, disk_gb * 1024**3))
+        if spec.get('browser_proxy') is not None:
+            if not spec.get('image_ref', '').startswith('ubuntu-xfce:'): raise ValueError('Browser proxy requires Ubuntu')
+            from install_browser_proxy import install
+            install(disk, spec['browser_proxy'])
         seed_disk(folder / 'identity.img', payload)
         ports = set()
         while len(ports) < 3: ports.add(free_port())
@@ -446,6 +450,9 @@ class Runner:
 
     def reseed(self, identifier, payload):
         self.require_stopped(identifier)
+        if self.metadata(identifier).get('image_ref', '').startswith('ubuntu-xfce:'):
+            from install_browser_proxy import install
+            install(self.folder(identifier) / 'root.ext4', payload.get('browser_proxy'))
         fields = {'MOLA_ENDPOINT': json.loads(self.config_path.read_text())['guest_endpoint'],
                   'MOLA_REGISTRATION_TOKEN': payload['registration_token'],
                   'MOLA_COMPUTER_ID': identifier, 'MOLA_MACHINE_NAME': payload['name'],

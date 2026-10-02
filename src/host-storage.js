@@ -84,6 +84,7 @@ export async function storageOperation(api, id, verb, body) {
   const data = await api.runtime.storageOperation(id, verb, body);
   if (verb === 'restore') await api.runtime.reseed(id, {
     registration_token: record.registration_token, authorized_keys: record.authorized_keys, name: record.name,
+    browser_proxy: record.cloud.create_spec?.browser_proxy ?? null,
   });
   const result = { status: verb === 'snapshot' ? 201 : 200, body: { data } };
   operation.result = result;
