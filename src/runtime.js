@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { statePath, runtimeScript } from './paths.js';
+import { installedImages } from './installed-images.js';
 
 /** Ask the kernel for a free loopback port rather than hoping one is free. */
 function freePort() {
@@ -45,6 +46,8 @@ export class Runtime {
       architecture: this.host.platform === 'darwin' ? 'aarch64' : 'x86_64',
       qemu: this.host.qemu,
       image: statePath('image'),
+      default_image_ref: process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0',
+      images: installedImages(),
       kernel_args: 'root=/dev/vda rw rootwait console=hvc0 systemd.unit=multi-user.target omarchy.qemu_virgl=1',
       // virtio-gpu-gl needs a GL context, and on macOS that context comes from
       // the cocoa display. This is the configuration measured to boot a real

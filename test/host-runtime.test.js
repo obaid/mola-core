@@ -55,3 +55,55 @@ with tempfile.TemporaryDirectory() as temp:
   const result = spawnSync('python3', ['-c', script], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
+
+test('native mixed-image clones pin kernels, CPU graphics and restore sidecars across runtime restarts', () => {
+  const modulePath = fileURLToPath(new URL('../runtime/native/host.py', import.meta.url));
+  const script = `
+import importlib.util, tempfile, pathlib, json
+spec = importlib.util.spec_from_file_location('mola_host', ${JSON.stringify(modulePath)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as temp:
+    root = pathlib.Path(temp)
+    runner = m.Runner.__new__(m.Runner)
+    runner.root = root; runner.machines = root / 'machines'; runner.machines.mkdir()
+    runner.sockets = root / 'sockets'; runner.sockets.mkdir()
+    runner.image = root / 'omarchy'; runner.image.mkdir()
+    ubuntu = root / 'ubuntu'; ubuntu.mkdir()
+    for directory in [runner.image, ubuntu]:
+        (directory / 'root.ext4').write_bytes(directory.name.encode())
+        for name in ['vmlinuz-linux', 'initramfs-linux.img']: (directory / name).touch()
+    runner.default_image_ref = 'omarchy-agent:0.1.0'
+    runner.images = {
+        runner.default_image_ref: {'path': str(runner.image), 'kernel_args': 'omarchy=1', 'gpu': 'virtio-gpu-gl-pci', 'display': 'egl-headless'},
+        'ubuntu-xfce:24.04-1': {'path': str(ubuntu), 'kernel_args': 'root=/dev/vda rw', 'gpu': 'virtio-gpu-pci', 'display': 'none'},
+    }
+    runner.qemu = root / 'qemu'
+    runner.config = {'guest_endpoint': 'http://10.0.2.2:4141', 'max_memory_mb': 8192}
+    runner.config_path = root / 'config.json'; runner.config_path.write_text(json.dumps(runner.config))
+    runner.arch = 'x86_64'; runner.accel = 'kvm'; runner.processes = {}
+    machine = {'computer_id': '11111111-1111-4111-8111-111111111111', 'name': 'test', 'vcpus': 1, 'memory_mb': 2048, 'disk_gb': 20, 'registration_token': 'secret', 'authorized_keys': [], 'image_ref': 'ubuntu-xfce:24.04-1'}
+    runner.create(machine)
+    data = runner.metadata(machine['computer_id'])
+    assert data['image_ref'] == machine['image_ref']
+    with (runner.folder(data['id']) / 'root.ext4').open('rb') as stream: assert stream.read(6) == b'ubuntu'
+    command = runner.command(data)
+    assert command[command.index('-kernel') + 1] == str(ubuntu / 'vmlinuz-linux')
+    assert command[command.index('-display') + 1] == 'none'
+    assert 'virtio-gpu-gl-pci' not in command
+    # Metadata loaded from disk, not a mutable global current-image selection.
+    runner.image = root / 'changed-default'
+    assert runner.command(runner.metadata(data['id'])) == command
+    assert runner.selected_image(data)['path'] == str(ubuntu)
+    legacy = dict(data); del legacy['image_ref']
+    assert runner.selected_image(legacy)['path'].endswith('omarchy')
+    try: runner.create(dict(machine, computer_id='22222222-2222-4222-8222-222222222222', image_ref='/etc/passwd'))
+    except ValueError: pass
+    else: raise AssertionError('unknown image accepted')
+    assert len(runner.list()) == 1
+    try: runner.create(dict(machine, image_ref=runner.default_image_ref))
+    except ValueError: pass
+    else: raise AssertionError('image switch on retained disk accepted')
+`;
+  const result = spawnSync('python3', ['-c', script], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});

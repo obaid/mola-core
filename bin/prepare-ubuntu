@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Build/export an immutable Ubuntu image directory; never overwrite an image."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import uuid
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--output', type=Path, required=True)
+args = parser.parse_args()
+root = Path(__file__).resolve().parent.parent
+output = args.output.resolve()
+output.mkdir(parents=True, mode=0o700, exist_ok=False)
+marker = output / 'STAGING_INCOMPLETE'
+marker.touch()
+def run(*command): subprocess.run(command, cwd=root, check=True)
+try:
+    run('python3', str(root / 'bin/build-images'), '--desktop', 'ubuntu', '--guest-only')
+    name = 'mola-export-ubuntu-' + uuid.uuid4().hex[:12]
+    run('docker', 'create', '--name', name, 'mola/ubuntu-kvm:local')
+    try: run('docker', 'cp', name + ':/opt/mola/.', str(output))
+    finally: run('docker', 'rm', '-v', name)
+    run('docker', 'run', '--rm', '--entrypoint', 'zstd', '-v', str(output) + ':/output',
+        'mola/ubuntu-kvm:local', '-d', '--sparse', '/output/root.ext4.zst', '-o', '/output/root.ext4')
+    (output / 'root.ext4.zst').unlink()
+    guest = output / 'mola-guest'
+    with guest.open('rb') as stream: digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    (output / 'guest-agent.json').write_text(json.dumps({
+        'schema': 1, 'file': 'mola-guest', 'architecture': 'x86_64',
+        'version': '24.04-1', 'sha256': digest,
+    }, indent=2) + '\n')
+    marker.unlink()
+    print('Prepared Ubuntu x86_64 image: ' + str(output))
+except BaseException:
+    marker.rename(output / 'STAGING_FAILED')
+    raise

@@ -338,3 +338,7 @@ using [guest-agent image updates](docs/guest-agent-image-update.md).
 See [1.2.0 release notes](CHANGELOG.md) for upgrade requirements, including
 cleanly stopping guests managed by an older Linux runtime before its first
 upgrade to persistent QMP sockets. The npm update does not update guest images.
+
+## Ubuntu desktops
+
+See [Ubuntu desktops](docs/ubuntu-desktops.md) for image selection, resource defaults and host requirements.

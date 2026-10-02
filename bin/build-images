@@ -7,12 +7,16 @@ import subprocess
 root = Path(__file__).resolve().parent.parent
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--guest-only', action='store_true')
+p.add_argument('--desktop', choices=['omarchy', 'ubuntu'], default='omarchy')
 a = p.parse_args()
 (root / 'image/omarchy/bin').mkdir(parents=True, exist_ok=True)
 def run(*args): subprocess.run(list(args), cwd=root, check=True)
 run('docker', 'run', '--rm', '-e', 'GOOS=linux', '-e', 'GOARCH=amd64', '-e', 'CGO_ENABLED=0',
     '-v', str(root / 'guest/mola-guest') + ':/src:ro', '-v', str(root / 'image/omarchy/bin') + ':/out',
     '-w', '/src', 'golang:1.24-bookworm', 'go', 'build', '-o', '/out/mola-guest-amd64', './cmd/mola-guest')
-run('docker', 'build', '--platform', 'linux/amd64', '-t', 'mola/omarchy:dev', 'image/omarchy')
-run('docker', 'build', '--platform', 'linux/amd64', '-t', 'mola/omarchy-kvm:local', 'image/kvm')
+if a.desktop == 'ubuntu':
+    run('docker', 'build', '-t', 'mola/ubuntu-kvm:local', '-f', 'image/ubuntu/Dockerfile', '.')
+else:
+    run('docker', 'build', '--platform', 'linux/amd64', '-t', 'mola/omarchy:dev', 'image/omarchy')
+    run('docker', 'build', '--platform', 'linux/amd64', '-t', 'mola/omarchy-kvm:local', 'image/kvm')
 if not a.guest_only: run('docker', 'compose', 'build', 'app', 'gateway')

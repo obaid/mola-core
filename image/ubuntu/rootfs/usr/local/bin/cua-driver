@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+export DISPLAY="${DISPLAY:-:1}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${XDG_RUNTIME_DIR}/bus}"
+export CUA_DRIVER_RS_ENABLE_WAYLAND=0 CUA_DRIVER_RS_TELEMETRY_ENABLED=false CUA_DRIVER_RS_UPDATE_CHECK=false
+exec /opt/mola/cua-driver/cua-driver "$@"

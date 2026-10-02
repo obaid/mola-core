@@ -566,3 +566,38 @@ test('fenced source can reincarnate only after confirmed deletion and preserve r
   await s.send(`machines/${id}/start`, command(3));
   assert.equal(s.machines.size, 1);
 });
+
+test('one host accepts Ubuntu and Omarchy, pins image in durable intent, and rejects arbitrary refs', async t => {
+  const s = setup(t);
+  const ubuntuRef = 'ubuntu-xfce:24.04-1';
+  s.api.images = { [ubuntuRef]: { path: '/operator/images/ubuntu' } };
+  const ubuntu = { ...s.create, image_ref: ubuntuRef, memory_mb: 2048, vcpus: 1 };
+  await s.send('machines', ubuntu);
+  assert.equal(s.calls[0][1].image_ref, ubuntuRef);
+  assert.equal(JSON.parse(readFileSync(s.file, 'utf8'))[ubuntu.id].cloud.create_spec.image_ref, ubuntuRef);
+  await s.send('machines', { ...s.create, id: randomUUID(), operation_id: randomUUID() });
+  assert.equal(s.calls[1][1].image_ref, s.create.image_ref);
+  const catalog = (await s.send('images', {}, 'GET')).body.data;
+  assert.deepEqual(catalog, [{ image_ref: s.create.image_ref }, { image_ref: ubuntuRef }]);
+  assert.doesNotMatch(JSON.stringify(catalog), /operator\/images/);
+  await assert.rejects(s.send('machines', { ...ubuntu, id: randomUUID(), image_ref: '/tmp/root.ext4' }), conflict);
+  await assert.rejects(s.send('machines', { ...ubuntu, image_ref: s.create.image_ref }), conflict);
+  s.reload(); // Completed operations can replay even after an image leaves the catalog.
+  assert.equal((await s.send('machines', ubuntu)).body.data.image_ref, ubuntuRef);
+});
+
+test('pending Ubuntu create survives restart with its original image and credentials', async t => {
+  const s = setup(t);
+  const images = { 'ubuntu-xfce:24.04-1': {} };
+  s.api.images = images;
+  const body = { ...s.create, image_ref: 'ubuntu-xfce:24.04-1', memory_mb: 2048, vcpus: 1 };
+  const create = s.runtime.create;
+  s.runtime.create = async spec => { await create(spec); throw new Error('lost response'); };
+  await assert.rejects(s.send('machines', body), /lost response/);
+  s.reload();
+  await assert.rejects(s.send('machines', body), /original installed image/);
+  s.api.images = images;
+  s.runtime.create = create;
+  await s.send('machines', body);
+  assert.deepEqual(s.calls[0][1], s.calls[1][1]);
+});
