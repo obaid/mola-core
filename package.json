@@ -1,7 +1,7 @@
 {
   "name": "mola-core",
-  "version": "1.5.1",
-  "description": "Run Omarchy computers on your own machine and drive them over a REST API.",
+  "version": "1.6.0",
+  "description": "Run persistent Linux desktops with Omarchy or Ubuntu and drive them over a REST API.",
   "homepage": "https://mola.sh",
   "license": "FSL-1.1-ALv2",
   "type": "module",
@@ -46,6 +46,8 @@
     "agent",
     "sandbox",
     "desktop",
-    "hyprland"
+    "hyprland",
+    "ubuntu",
+    "xfce"
   ]
 }

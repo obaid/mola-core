@@ -22,9 +22,14 @@ Hand those to your agent. It can create a computer, run shell commands, read and
 write files, take screenshots, move the mouse and type, open the desktop in a
 browser, and delete the whole thing when it is done.
 
-Each computer is a full [Omarchy](https://omarchy.org) desktop: Arch Linux with
+By default, each computer is a full [Omarchy](https://omarchy.org) desktop: Arch Linux with
 Hyprland, running in its own virtual machine. Creating one takes about a second
 and it becomes usable in under ten.
+
+Native x86_64 KVM hosts can also run [Ubuntu 24.04 XFCE desktops](docs/ubuntu-desktops.md)
+with CPU-rendered graphics, a preconfigured Chrome profile and agent-controlled
+window tiling. Install the separate Ubuntu image and select its immutable image
+reference when creating a computer. Existing computers keep their selected image.
 
 ## What you need
 

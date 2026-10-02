@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.0 — 2026-10-02
+
+- Support lightweight Ubuntu 24.04 XFCE desktops alongside the default Omarchy
+  image on native x86_64 KVM hosts. Each computer retains its selected image
+  across lifecycle, snapshot and restore operations.
+- Add image catalogs and per-image resource defaults, including Ubuntu Lite at
+  1 vCPU, 2 GiB RAM and 20 GB disk.
+- Provide a shared Ubuntu 24.04-4 image recipe with a persistent Chrome Default
+  profile, no startup picker, XFCE tiling shortcuts and the JSON `mola-tile` tool.
+- Guest images remain separate artifacts. Updating npm does not replace existing
+  images or computers; build recipes require the matching repository checkout.
+
 ## 1.5.1 — 2026-09-27
 
 - Reconcile the retained local Cua work with the already-published 1.5.0 source.
