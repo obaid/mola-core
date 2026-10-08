@@ -198,9 +198,20 @@ keys and token, and reports what it freed.
 
 ## Requirements
 
-Node 20+. Apple Silicon Mac with `brew install qemu`, Python 3.10+, an SSH
+Node.js ^22.15.0 or >=24.0.0. Apple Silicon Mac with `brew install qemu`, Python 3.10+, an SSH
 client; or Linux x86_64 with `qemu-system-x86_64` and a usable `/dev/kvm`.
 `npx mola-core doctor` reports what is present and names anything missing.
+
+## Hosted storage and cloud agents
+
+Mola Core 1.8.0 uses durable operation/generation-bound receipts for private
+host storage. A pending snapshot or restore returns HTTP 202; reconcile the
+same receipt and retain disk ownership until a terminal result. Restore stages
+and verifies the disk before atomic replacement. See the
+[host storage contract](https://github.com/obaid/mola-core/blob/main/docs/host-storage.md).
+These APIs require a separate operator credential. Hosted customer metadata,
+fixed expiry, computer-scoped MCP grants and OAuth are documented at
+[Mola Cloud](https://cloud.mola.sh/docs/mcp).
 
 ## Docs
 
