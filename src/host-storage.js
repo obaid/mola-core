@@ -81,13 +81,60 @@ export async function storageOperation(api, id, verb, body) {
     api.registry.flush();
   }
   if (['restore', 'fence'].includes(verb)) { revokeDesktop(id); revokeSsh(id); revokeDataPlane(id); revokeCua(id); }
-  const data = await api.runtime.storageOperation(id, verb, body);
-  if (verb === 'restore') await api.runtime.reseed(id, {
-    registration_token: record.registration_token, authorized_keys: record.authorized_keys, name: record.name,
-    browser_proxy: record.cloud.create_spec?.browser_proxy ?? null,
-  });
+  let data;
+  if (operation.runtime_result) data = operation.runtime_result;
+  else {
+    const response = await api.runtime.storageOperation(id, verb, body);
+    const receipt = response.storage_operation;
+    if (receipt) {
+      if (receipt.operation_id !== body.operation_id || receipt.verb !== verb || receipt.generation !== body.generation)
+        fail(502, 'Native storage receipt identity mismatch.');
+      if (receipt.status === 'pending') return pendingStorageResult(verb, body);
+      if (receipt.status === 'failed') {
+        // Restore admission rotated enrollment credentials. Even when the
+        // original disk survived a rejected restore, reconcile its identity
+        // before releasing the intent for a later start or deletion.
+        if (verb === 'restore') await reseedRestore(api, id, record);
+        const result = { status: receipt.error_status || 503, body: { error: receipt.error || 'Native storage operation failed.',
+          code: 'storage_operation_failed', operation: { operation_id: body.operation_id, verb, generation: body.generation, status: 'failed' } } };
+        operation.result = result;
+        api.registry.flush();
+        return result;
+      }
+      if (receipt.status !== 'completed' || !receipt.result) fail(502, 'Invalid native storage receipt.');
+      data = receipt.result;
+    } else data = response; // Compatibility with an older synchronous runtime.
+    // Restore is already committed. A lost reseed reply must never decompress
+    // and replace the guest disk a second time.
+    operation.runtime_result = data;
+    api.registry.flush();
+  }
+  if (verb === 'restore') await reseedRestore(api, id, record);
   const result = { status: verb === 'snapshot' ? 201 : 200, body: { data } };
   operation.result = result;
   api.registry.flush();
   return result;
+}
+
+export function pendingStorageResult(verb, body) {
+  return { status: 202, body: { data: { operation_id: body.operation_id, verb,
+    generation: body.generation, status: 'pending', retry_after_ms: 1000 } } };
+}
+
+/** Receipt polling reconciles the same persisted payload, including reseeding
+ * after a core restart. It cannot manufacture a new operation identity. */
+export async function storageReceipt(api, id, verb, operationId) {
+  if (!STORAGE_VERBS.includes(verb) || !/^[a-zA-Z0-9_-]{1,128}$/.test(operationId || '')) fail(400, 'Invalid storage operation identity.');
+  const record = api.record(id);
+  const operation = record.cloud.operations[`${verb}:${operationId}`];
+  if (!operation) fail(404, 'No such storage operation.');
+  const body = JSON.parse(operation.fingerprint);
+  return storageOperation(api, id, verb, body);
+}
+
+function reseedRestore(api, id, record) {
+  return api.runtime.reseed(id, {
+    registration_token: record.registration_token, authorized_keys: record.authorized_keys, name: record.name,
+    browser_proxy: record.cloud.create_spec?.browser_proxy ?? null,
+  });
 }

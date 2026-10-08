@@ -116,7 +116,7 @@ export class Runtime {
     }
   }
 
-  async #call(method, path, body) {
+  async #call(method, path, body, timeout = 120_000) {
     const response = await fetch(this.base + path, {
       method,
       headers: {
@@ -124,7 +124,7 @@ export class Runtime {
         ...(body ? { 'content-type': 'application/json' } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(timeout),
     });
     const text = await response.text();
     const payload = text ? JSON.parse(text) : {};
@@ -134,7 +134,21 @@ export class Runtime {
     return payload;
   }
 
-  storageOperation(id, verb, body) { return this.#call('POST', `/machines/${id}/${verb}`, body); }
+  async storageOperation(id, verb, body) {
+    // Durable disk commands acknowledge intent promptly. Keep one request's
+    // wait bounded; retrying the same identity reads the native receipt.
+    let result = await this.#call('POST', `/machines/${id}/${verb}`, body, body.operation_id ? 10_000 : 120_000);
+    if (!result.storage_operation) return result;
+    const deadline = Date.now() + 1500;
+    while (result.storage_operation.status === 'pending' && Date.now() < deadline) {
+      await delay(100);
+      result = await this.storageReceipt(id, verb, body.operation_id);
+    }
+    return result;
+  }
+  storageReceipt(id, verb, operationId) {
+    return this.#call('GET', `/machines/${id}/storage-operations/${verb}/${operationId}`, undefined, 10_000);
+  }
   snapshotManifest(id, snapshotId) { return this.#call('GET', `/machines/${id}/snapshots/${snapshotId}`); }
   reseed(id, body) { return this.#call('POST', `/machines/${id}/reseed`, body); }
 

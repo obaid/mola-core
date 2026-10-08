@@ -4,6 +4,7 @@ Customer files and customer-installed credentials intentionally remain. Only
 identities that would make two machines claim to be the same host are reset.
 """
 import argparse
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -29,10 +30,20 @@ def quote(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
+def storage_lease_options():
+    """Keep the supervisor lease in every nested filesystem tool process."""
+    value = os.environ.get('MOLA_STORAGE_LEASE_FD')
+    if value is None: return {}
+    if os.name == 'nt' or not value.isdigit(): raise ValueError('Invalid inherited storage lease')
+    descriptor = int(value)
+    os.fstat(descriptor) # Fail closed if a caller dropped the advertised lease.
+    return {'pass_fds': (descriptor,)}
+
+
 def debugfs(disk, command, writable=False):
     result = subprocess.run(
         ['debugfs', *(['-w'] if writable else []), '-R', command, str(disk)],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, timeout=120, **storage_lease_options(),
     )
     if result.returncode != 0:
         raise ValueError('Guest filesystem operation failed')
@@ -50,7 +61,7 @@ def fsck(disk):
     # snapshot made after an unclean guest shutdown remain usable. e2fsck uses
     # bit 1 for corrected errors and bit 2 for "reboot recommended"; neither
     # is an error for an offline image that has not been booted yet.
-    result = subprocess.run(['e2fsck', '-fp', str(disk)], capture_output=True, text=True, timeout=300)
+    result = subprocess.run(['e2fsck', '-fp', str(disk)], capture_output=True, text=True, timeout=300, **storage_lease_options())
     if result.returncode not in (0, 1, 2):
         raise ValueError('Guest filesystem failed consistency validation')
 

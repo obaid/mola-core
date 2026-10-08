@@ -33,7 +33,7 @@ reference when creating a computer. Existing computers keep their selected image
 
 ## What you need
 
-Node 20 or newer, plus:
+Node 22 (22.15 or newer) or Node 24+, plus:
 
 | | |
 |---|---|

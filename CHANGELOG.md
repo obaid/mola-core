@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.8.0 — unreleased
+
+- Run private host storage commands with durable, generation-bound receipts.
+  A long operation returns HTTP 202 and can be reconciled after a lost response
+  or a core restart without replacing a committed restore twice.
+- Serialize disk writers, persist and verify restore staging before publishing
+  it, and hold a supervisor lease through Linux transform subprocesses.
+- Replay an unclean ext4 journal only on unpublished restore staging before
+  refreshing the managed guest daemon; reject an unsuccessful final check.
+- Keep uncertain disks fenced. Transform deadline expiry requires operator
+  reconciliation and a supervisor restart; it is not permission to start a guest.
+- Add crash-window, retry, checksum, recreation and subprocess-lease tests.
+- Correct the declared Node requirement to 22.15+ or 24+: existing image
+  decompression uses built-in Zstd, which is unavailable on Node 20.
+
 ## 1.7.0 — 2026-10-02
 
 - Add private Decodo browser-proxy bindings to Ubuntu desktops, with a local

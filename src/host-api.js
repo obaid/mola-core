@@ -5,7 +5,7 @@ import { authorised, validateSpec, validateAction } from './api.js';
 import { revokeDesktop } from './desktop.js';
 import { handleSsh, revokeSsh } from './ssh.js';
 import { CuaSessions, revokeCua } from './cua.js';
-import { storageOperation, STORAGE_VERBS } from './host-storage.js';
+import { storageOperation, storageReceipt, STORAGE_VERBS } from './host-storage.js';
 import { revokeDataPlane } from './data-plane.js';
 import { installedImages } from './installed-images.js';
 import { validateBrowserProxy } from './browser-proxy.js';
@@ -120,6 +120,10 @@ export class HostApi {
         return { status: 200, body: { data: { available: probe.exit_code === 0 && version !== null,
           version, hyprland_plugin: false } } };
       });
+    }
+    if (method === 'GET' && parts.length === 5 && parts[2] === 'storage-operations') {
+      if (!UUID.test(parts[1] || '')) fail(400, 'id must be a UUID.');
+      return this.locked(parts[1], () => storageReceipt(this, parts[1], parts[3], parts[4]));
     }
     if (method === 'GET' && parts.length === 4 && parts[2] === 'snapshots') {
       this.record(parts[1]);
@@ -299,6 +303,7 @@ export class HostApi {
     if (verb === 'create') {
       if (!this.hasImage(record.cloud.image_ref)) fail(409, 'Pending create requires its original installed image.');
       await this.runtime.create({ computer_id: id, ...record.cloud.create_spec,
+        ...(record.cloud.incarnation_generation ? { incarnation_generation: record.cloud.incarnation_generation } : {}),
         registration_token: record.registration_token, authorized_keys: record.authorized_keys });
     } else if (verb === 'start') {
       const described = await this.runtime.describe(id);

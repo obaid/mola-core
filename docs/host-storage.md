@@ -39,7 +39,14 @@ atomic rename. Hosted restore then refreshes the fixed platform guest-daemon pat
 from an operator-pinned sidecar before publishing the temporary disk; customer
 files retain the snapshot's contents. The response's `snapshot_sha256` identifies
 the verified original snapshot, while `guest_agent_refreshed` records that managed
-binary update. Failure leaves the current disk in place. Restore rotates the
+binary update. A forced stop can leave an ext4 journal unreplayed. After verifying
+the original artifact and raw-disk checksums, hosted restore runs `e2fsck -fp`
+only on its unpublished staging copy before the daemon update. Exit 0 means
+clean, 1 means errors corrected, and 2 means reboot recommended; 1 and 2 are
+acceptable for an offline image that has not booted. Other results refuse the
+restore. A final `e2fsck -fn` must return zero after installation. The archived
+snapshot and current live disk are never repaired in place. Failure leaves the
+current disk in place. Restore rotates the
 agent registration credential and reseeds host-specific identity before the
 next boot. It does not start the machine.
 
@@ -127,3 +134,73 @@ its guests cleanly using the old supervisor before replacing the service. The
 new location does not relocate a live old QEMU socket automatically.
 
 See [guest-agent image updates](guest-agent-image-update.md) before enabling hosted restore. The matching static daemon sidecar and manifest are required so snapshots containing older agents can re-enroll after credential rotation.
+
+## Durable storage receipts
+
+Snapshot, restore, import, seal, snapshot deletion and fence requests that carry
+`operation_id` and `generation` run as native background operations. Compression,
+decompression and checksum verification may take minutes without holding an HTTP
+connection open. The core waits about 1.5 seconds for a receipt; completed requests
+retain the existing 201/200 response and manifest/result shape. Work still running
+returns HTTP 202:
+
+```json
+{
+  "data": {
+    "operation_id": "stable-command-uuid",
+    "verb": "restore",
+    "generation": 2,
+    "status": "pending",
+    "retry_after_ms": 1000
+  }
+}
+```
+
+Retry the original POST with its exact payload, or GET
+`/machines/{id}/storage-operations/{verb}/{operation_id}`. Both reconcile the same
+operation and return 202 while pending, the original successful response when
+complete, or the saved failure. A known failed receipt includes
+`code: "storage_operation_failed"` and `operation` with its identity and
+`status: "failed"`. A timeout or unavailable host without that code is an
+ambiguous transport outcome; retain the operation identity and reconcile it.
+The receipt endpoint also completes any required core identity reseeding.
+
+The machine's status remains `unknown` while core intent is pending. Keep its
+reservation and disk ownership held; a stopped observation cannot release them.
+On a retry, reconcile the accepted operation before requiring stopped state
+again. A different payload, later operation, or stale generation cannot overtake
+pending work. Terminal failures permit later cleanup and rotate/reseed restore
+identity so an unchanged disk can enroll on its next boot.
+
+Native intent, prepared restore commit evidence and terminal results are fsynced
+under `runtime/storage-operations/{machine_id}/{incarnation}/`. New native machine
+creates receive a fresh incarnation identity; older disks use their immutable
+create fingerprint. Receipts retained after destruction cannot apply to a newly
+created disk at the same UUID. The supervisor holds an OS file lease over its
+state root, preventing two native processes from running recovery workers at
+once. On POSIX the lease is also inherited by restore transformation helpers
+and their nested filesystem writers, so killing or timing out a helper does not
+admit a new writer while an orphan still modifies its staging disk. If the outer
+helper times out, the native supervisor exits with code 75 and leaves the
+receipt pending. Restart the host service after its remaining writers exit;
+recovery then acquires the lease and resumes unfinished preparation. This
+conservative exit prevents the same supervisor from admitting another restore
+while an orphan is alive. Snapshot
+publication and import sync every containing directory; snapshot deletion syncs
+the surviving parent before its completion receipt. Disk workers serialize with
+lifecycle mutations for their own machine;
+health, inventory and other machines remain responsive.
+
+After a native restart, pending operations resume from the same journal. A
+restore saves the prepared disk checksum and result before atomic replacement.
+Recovery verifies a surviving prepared disk or the committed destination instead
+of decompressing again after a lost acknowledgement. Failures during archive
+verification leave the existing guest disk intact. A crash before preparation
+can repeat unfinished compression/decompression; no completed restore is repeated.
+The core separately persists the committed native result before reseeding, so a
+core restart or lost reseed reply repeats only the idempotent identity step.
+
+Chunk writes and direct object-store transfer grants retain their existing
+bounded, resumable contracts; their bulk data and signed credentials are never
+written to the durable operation journal. Historical receipts are retained for
+fencing; automatic history pruning and progress percentages are not implemented.

@@ -4,6 +4,7 @@ No guest paths, download URLs or binary locations come from an API request.
 The caller publishes the disk only after this helper verifies its result.
 """
 import argparse
+import os
 import hashlib
 import json
 from pathlib import Path
@@ -45,15 +46,31 @@ def quote(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
+def storage_lease_options():
+    """Keep the supervisor lease in every nested filesystem tool process."""
+    value = os.environ.get('MOLA_STORAGE_LEASE_FD')
+    if value is None: return {}
+    if os.name == 'nt' or not value.isdigit(): raise ValueError('Invalid inherited storage lease')
+    descriptor = int(value)
+    os.fstat(descriptor) # Fail closed if a caller dropped the advertised lease.
+    return {'pass_fds': (descriptor,)}
+
+
 def debugfs(disk, command, writable=False):
-    result = subprocess.run(['debugfs', *(['-w'] if writable else []), '-R', command, str(disk)], capture_output=True, text=True, timeout=120)
+    result = subprocess.run(['debugfs', *(['-w'] if writable else []), '-R', command, str(disk)], capture_output=True, text=True, timeout=120, **storage_lease_options())
     if result.returncode != 0: raise ValueError('Guest filesystem operation failed')
     return result.stdout
 
 
-def fsck(disk):
-    result = subprocess.run(['e2fsck', '-fn', str(disk)], capture_output=True, text=True, timeout=300)
-    if result.returncode != 0: raise ValueError('Guest filesystem failed read-only consistency validation')
+def fsck(disk, repair=False):
+    # A stopped snapshot may follow a forced power-off. Replay its journal and
+    # preen only the unpublished, checksummed staging copy before touching the
+    # agent. Codes 1 (corrected) and 2 (reboot recommended) are successful for an
+    # offline disk that has not booted; every other nonzero result is refused.
+    # The final check remains strictly read-only and must return zero.
+    result = subprocess.run(['e2fsck', '-fp' if repair else '-fn', str(disk)], capture_output=True, text=True, timeout=300, **storage_lease_options())
+    if result.returncode not in ((0, 1, 2) if repair else (0,)):
+        raise ValueError('Guest filesystem failed staging repair' if repair else 'Guest filesystem failed read-only consistency validation')
 
 
 def refresh(image, disk, expected_architecture=None):
@@ -66,12 +83,12 @@ def refresh(image, disk, expected_architecture=None):
     if expected_architecture is not None and manifest['architecture'] != expected_architecture: raise ValueError('Trusted guest daemon does not match runtime architecture')
     binary = image / 'mola-guest'
     validate_binary(binary, manifest['architecture'], str(manifest.get('sha256', '')))
+    fsck(disk, repair=True)
     for directory in ['/usr', '/usr/local', '/usr/local/bin']:
         if not re.search(r'Type:\s+directory\b', debugfs(disk, 'stat ' + directory)):
             raise ValueError('Guest daemon parent must be a real directory')
     if not re.search(r'Type:\s+regular\b', debugfs(disk, 'stat ' + DESTINATION)):
         raise ValueError('Guest daemon destination must already be a regular file')
-    fsck(disk)
     debugfs(disk, 'rm ' + DESTINATION, writable=True)
     debugfs(disk, 'write ' + quote(binary) + ' ' + DESTINATION, writable=True)
     for field, value in [('mode', '0100755'), ('uid', '0'), ('gid', '0')]:
