@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.8.0 — unreleased
+## 1.8.0 — 2026-10-08
 
 - Run private host storage commands with durable, generation-bound receipts.
   A long operation returns HTTP 202 and can be reconciled after a lost response

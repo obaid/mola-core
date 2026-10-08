@@ -30,8 +30,8 @@ POST `/machines/{id}/snapshot`, `/restore`, or `/snapshot-delete`:
 }
 ```
 
-Snapshot creation returns HTTP 201 and `{ "data": manifest }`. Other operations
-return 200. GET `/machines/{id}/snapshots/{snapshot_id}` reads the same manifest.
+Completed snapshot creation returns HTTP 201 and `{ "data": manifest }`. Other
+completed operations return 200. Pending work returns 202; see durable receipts below. GET `/machines/{id}/snapshots/{snapshot_id}` reads the same manifest.
 The manifest contains `id`, `format` (`mola-raw-gzip-v1`), `architecture`,
 `size_bytes`, `sha256`, `artifact_bytes`, `artifact_sha256`, and `created_at`.
 Disk replacement validates both checksums and the declared size before an

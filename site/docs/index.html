@@ -59,6 +59,7 @@
             <li><a href="#tunnels">Port tunnels</a></li>
           </ol>
         </li>
+        <li><a href="#storage">Hosted storage</a></li>
         <li><a href="#mcp">MCP</a></li>
         <li><a href="#cua">Cua Driver</a></li>
         <li><a href="#api">API reference</a></li>
@@ -77,6 +78,7 @@
 <section id="start">
     <h2>Installation</h2>
     <p class="lede">Two commands on macOS. One on Linux, if you already installed QEMU.</p>
+    <p>Use Node.js 22.15 or later in the 22.x series, or Node.js 24 or later, plus Python 3.10+ and an SSH client. Linux requires x86_64 with usable KVM; macOS requires Apple Silicon.</p>
 
     <div class="steps">
       <div class="step">
@@ -128,6 +130,13 @@ curl -s -X POST $API/machines \
       <span class="lbl">Where the engine stores things</span>
       <p>The engine writes its token, keys, guest image, and machine disks to <code>~/.mola</code>. Set <code>MOLA_HOME</code> to move them. That directory sits outside the installed package on purpose: <code>npx</code> clears its cache without warning, and a machine's disk must outlive the tool that created it.</p>
     </div>
+  </section>
+<section id="storage">
+    <h2>Hosted storage and recovery</h2>
+    <p>Mola Core 1.8.0 gives an authenticated control plane durable storage receipts. Snapshot, restore, import, seal, delete and fence operations keep their operation ID and generation across lost responses and restarts. Long operations return HTTP 202 while pending; clients reconcile the same receipt before sending another mutation.</p>
+    <p>Restore verifies checksums and prepares a temporary disk before atomic replacement. Pending work keeps the disk fenced. A timeout does not prove the guest is stopped or make its capacity available.</p>
+    <p>These are private host APIs for operators. See the <a href="https://github.com/obaid/mola-core/blob/main/docs/host-storage.md">host storage contract</a> and <a href="https://github.com/obaid/mola-core/blob/main/docs/guest-agent-image-update.md">guest-agent update requirements</a>. The live recovery canary covers a 20 GB Ubuntu disk; broader image and disk-size qualification remains separate work.</p>
+    <p>For hosted computers, customer metadata, fixed expiry, restricted agent credentials and browser-approved MCP connections, use the <a href="https://cloud.mola.sh/docs">Mola Cloud docs</a>.</p>
   </section>
 <section id="build">
     <h2>Build your own guest image</h2>
