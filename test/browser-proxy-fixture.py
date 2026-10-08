@@ -3,6 +3,9 @@ import importlib.util
 import socket
 import sys
 import threading
+import tempfile
+import pathlib
+import json
 
 spec = importlib.util.spec_from_file_location('browser_proxy', sys.argv[1])
 m = importlib.util.module_from_spec(spec)
@@ -40,7 +43,9 @@ def connector(_):
     return client
 
 
-server = m.Server(('127.0.0.1', 0), config, connector=connector)
+temporary = tempfile.TemporaryDirectory(prefix='mola-proxy-meter-')
+meter = m.Meter(temporary.name, boot_id='owned-fixture-boot')
+server = m.Server(('127.0.0.1', 0), config, connector=connector, meter=meter)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 address = server.server_address
 with socket.create_connection(address, timeout=3) as client:
@@ -71,4 +76,14 @@ with socket.create_connection(address, timeout=3) as client:
     assert b'502 Bad Gateway' in response and b'private-fixture' not in response
 server.shutdown(); server.server_close()
 assert len(requests) == 4
+meter.add()
+counters = json.loads((pathlib.Path(temporary.name) / 'counters.json').read_text())
+assert counters['connections'] == 4 and counters['bytes_up'] > 0 and counters['bytes_down'] > 0
+assert 'private-fixture' not in json.dumps(counters) and 'example.com' not in json.dumps(counters)
+same = m.Meter(temporary.name, boot_id='owned-fixture-boot')
+assert same.state == counters, 'service restart reset usage or epoch'
+same.add(bytes_up=100)
+next_boot = m.Meter(temporary.name, boot_id='new-owned-fixture-boot')
+assert next_boot.state['counter_epoch'] != counters['counter_epoch'] and next_boot.state['bytes_up'] == counters['bytes_up'] + 100
+temporary.cleanup()
 print('HTTP forwarding, CONNECT tunnel, gateway-only authentication and fail-closed behavior passed')

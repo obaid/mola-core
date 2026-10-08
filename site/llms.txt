@@ -225,3 +225,11 @@ fixed expiry, computer-scoped MCP grants and OAuth are documented at
 
 Licence: FSL-1.1-ALv2. Use it for anything except building something that
 competes with Mola. Each release becomes Apache 2.0 two years after it ships.
+
+## Hosted guest tools and cloud workflows
+
+The private Linux host API provides managed browser, typed installer, session manifest, display geometry, scoped capture and private secret injection tools. These are cloud host routes with runtime-generation fencing, not the local desktop API above. Contract: https://github.com/obaid/mola-core/blob/main/docs/guest-tools.md
+
+Cloud guides: https://cloud.mola.sh/docs/browser-tools · https://cloud.mola.sh/docs/vault · https://cloud.mola.sh/docs/live-view · https://cloud.mola.sh/docs/jobs · https://cloud.mola.sh/docs/pools · https://cloud.mola.sh/docs/prepaid · https://cloud.mola.sh/docs/networking
+
+Query capabilities and provider availability. Do not treat a queued installer receipt as success, retry unknown side effects automatically, expose vault secrets or put viewer tokens in URLs.

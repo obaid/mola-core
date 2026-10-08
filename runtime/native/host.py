@@ -8,6 +8,7 @@ import base64
 import gzip
 import hashlib
 import hmac
+import importlib.util
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -23,8 +24,12 @@ import subprocess
 import threading
 import time
 
+_checkpoint_spec = importlib.util.spec_from_file_location('mola_live_checkpoint', Path(__file__).with_name('live_checkpoint.py'))
+_checkpoint_module = importlib.util.module_from_spec(_checkpoint_spec)
+_checkpoint_spec.loader.exec_module(_checkpoint_module)
+
 OPERATION_ID = re.compile(r'[a-zA-Z0-9_-]{1,128}')
-DURABLE_STORAGE_VERBS = ('snapshot', 'restore', 'snapshot-delete', 'snapshot-import', 'snapshot-seal', 'fence')
+DURABLE_STORAGE_VERBS = ('snapshot', 'checkpoint', 'restore', 'snapshot-delete', 'snapshot-import', 'snapshot-seal', 'fence', 'resize')
 
 
 class StorageConflict(ValueError):
@@ -299,6 +304,11 @@ class Runner:
                   'MOLA_REGISTRATION_TOKEN': spec['registration_token'],
                   'MOLA_COMPUTER_ID': identifier, 'MOLA_MACHINE_NAME': spec['name'],
                   'MOLA_AUTHORIZED_KEYS': '\n'.join(keys)}
+        display = spec.get('display')
+        if display is not None:
+            if not spec.get('image_ref', '').startswith('ubuntu-xfce:') or not isinstance(display, dict) or set(display) != {'width','height'} or not (type(display['width']) is int and type(display['height']) is int and 640 <= display['width'] <= 3840 and 480 <= display['height'] <= 2160):
+                raise ValueError('Invalid or unsupported display configuration')
+            fields['MOLA_DISPLAY_GEOMETRY'] = str(display['width']) + 'x' + str(display['height'])
         if any(not isinstance(value, str) or '\x00' in value for value in fields.values()):
             raise ValueError('Invalid identity')
         # Guest images cached before the rename read HYPERWAKE_*, and an image
@@ -358,6 +368,7 @@ class Runner:
                 'ssh_port': ssh_port, 'vnc_port': vnc_port, 'qmp_port': qmp_port, 'create_fingerprint': fingerprint,
                 'storage_incarnation': secrets.token_hex(16), 'storage_generation': spec.get('incarnation_generation', 0),
                 'image_ref': spec.get('image_ref', getattr(self, 'default_image_ref', 'omarchy-agent:0.1.0'))}
+        if display is not None: data['display'] = display
         write_json(folder / 'machine.json', data)
         folder.rename(destination)
         return self.describe(identifier)
@@ -461,13 +472,17 @@ class Runner:
 
     def reseed(self, identifier, payload):
         self.require_stopped(identifier)
-        if self.metadata(identifier).get('image_ref', '').startswith('ubuntu-xfce:'):
+        if self.metadata(identifier).get('image_ref', '').startswith('ubuntu-xfce:') and 'browser_proxy' in payload:
             from install_browser_proxy import install
-            install(self.folder(identifier) / 'root.ext4', payload.get('browser_proxy'))
+            install(self.folder(identifier) / 'root.ext4', payload.get('browser_proxy'), payload.get('network_binding'))
         fields = {'MOLA_ENDPOINT': json.loads(self.config_path.read_text())['guest_endpoint'],
                   'MOLA_REGISTRATION_TOKEN': payload['registration_token'],
                   'MOLA_COMPUTER_ID': identifier, 'MOLA_MACHINE_NAME': payload['name'],
                   'MOLA_AUTHORIZED_KEYS': '\n'.join(payload['authorized_keys'])}
+        display = payload.get('display', self.metadata(identifier).get('display'))
+        if display is not None:
+            if not isinstance(display, dict) or set(display) != {'width', 'height'} or not (type(display['width']) is int and type(display['height']) is int and 640 <= display['width'] <= 3840 and 480 <= display['height'] <= 2160): raise ValueError('Invalid display configuration')
+            fields['MOLA_DISPLAY_GEOMETRY'] = str(display['width']) + 'x' + str(display['height'])
         if any(not isinstance(value, str) or '\x00' in value for value in fields.values()): raise ValueError('Invalid identity')
         fields.update({'HYPERWAKE_' + key.removeprefix('MOLA_'): value for key, value in fields.items()})
         text = ''.join(key + '=' + shlex.quote(value) + '\n' for key, value in fields.items())
@@ -476,6 +491,8 @@ class Runner:
         with temporary.open('rb') as stream: os.fsync(stream.fileno())
         temporary.replace(self.folder(identifier) / 'identity.img')
         self.sync_directory(self.folder(identifier))
+        if display is not None:
+            data = self.metadata(identifier); data['display'] = display; write_json(self.folder(identifier) / 'machine.json', data); self.sync_directory(self.folder(identifier))
         return {'id': identifier, 'reseeded': True}
 
     def storage_path(self, identifier, snapshot_id):
@@ -499,6 +516,70 @@ class Runner:
         if self.status(self.metadata(identifier)) != 'stopped':
             raise ValueError('Stop the computer before changing its disk')
 
+    def capabilities(self):
+        return {'resize': True, 'resize_disk_grow': platform.system() == 'Linux' and all(shutil.which(t) for t in ['e2fsck', 'resize2fs', 'cp']),
+                'resize_disk_shrink': False, 'resize_requires_stopped': True,
+                'running_checkpoint': platform.system() == 'Linux' and self.config.get('running_checkpoint') is True,
+                'running_checkpoint_reason': None if platform.system() == 'Linux' and self.config.get('running_checkpoint') is True else 'operator qualification gate is disabled',
+                'resource_limits': {'vcpus': 8, 'memory_mb': min(16384, self.config.get('max_memory_mb', 8192)), 'disk_gb': 1024}}
+
+    def checkpoint(self, identifier, payload):
+        # Recovery remains available after an operator disables new admission.
+        path = payload.get('_receipt_path')
+        recovering = path and path.with_suffix('.checkpoint-state').exists()
+        if not recovering and not self.capabilities()['running_checkpoint']:
+            raise ValueError('Running checkpoint qualification is disabled')
+        return _checkpoint_module.checkpoint(self, identifier, payload)
+
+    def resize(self, identifier, payload):
+        self.require_stopped(identifier)
+        data = self.metadata(identifier)
+        cpus, memory, disk_gb = (payload.get(k) for k in ['vcpus', 'memory_mb', 'disk_gb'])
+        if not all(type(v) is int for v in [cpus, memory, disk_gb]) or not (1 <= cpus <= 8 and 1024 <= memory <= min(16384, self.config.get('max_memory_mb', 8192)) and 16 <= disk_gb <= 1024):
+            raise ValueError('Invalid resize resources')
+        destination = self.folder(identifier) / 'root.ext4'
+        if disk_gb * 1024**3 < destination.stat().st_size: raise ValueError('Disk shrinking is not supported')
+        receipt_path = payload.get('_receipt_path')
+        if not receipt_path: raise ValueError('Resize requires a durable operation identity')
+        receipt = json.loads(receipt_path.read_text())
+        prepared = receipt.get('prepared')
+        temporary = destination.with_suffix('.resize')
+        if prepared:
+            if prepared.get('sha256'):
+                if temporary.exists():
+                    if self.file_digest(temporary) != prepared['sha256']: raise ValueError('Prepared resize checksum mismatch')
+                    temporary.replace(destination); self.sync_directory(destination.parent)
+                elif self.file_digest(destination) != prepared['sha256']:
+                    raise ValueError('Interrupted resize could not establish disk commit')
+            data.update(prepared['resources'])
+            write_json(self.folder(identifier) / 'machine.json', data); self.sync_directory(self.folder(identifier))
+            return prepared['result']
+        resources = {'vcpus': cpus, 'memory_mb': memory, 'disk_gb': disk_gb}
+        result = {'id': identifier, 'status': 'stopped', 'disk_id': identifier, **resources}
+        digest = None
+        try:
+            if disk_gb * 1024**3 > destination.stat().st_size:
+                if not self.capabilities()['resize_disk_grow']: raise ValueError('Disk growth is unsupported on this host')
+                subprocess.run(['cp', '--reflink=auto', '--sparse=always', str(destination), str(temporary)], check=True, capture_output=True, timeout=900, **self.storage_subprocess_options())
+                with temporary.open('r+b') as stream: stream.truncate(disk_gb * 1024**3); stream.flush(); os.fsync(stream.fileno())
+                check = subprocess.run(['e2fsck', '-fp', str(temporary)], capture_output=True, timeout=300, **self.storage_subprocess_options())
+                if check.returncode not in (0, 1, 2): raise ValueError('Resize staging filesystem failed repair')
+                subprocess.run(['resize2fs', str(temporary)], check=True, capture_output=True, timeout=900, **self.storage_subprocess_options())
+                check = subprocess.run(['e2fsck', '-fn', str(temporary)], capture_output=True, timeout=300, **self.storage_subprocess_options())
+                if check.returncode != 0: raise ValueError('Resize staging filesystem failed strict validation')
+                with temporary.open('rb') as stream: os.fsync(stream.fileno())
+                digest = self.file_digest(temporary)
+            self.require_stopped(identifier)
+            receipt = json.loads(receipt_path.read_text())
+            receipt['prepared'] = {'sha256': digest, 'resources': resources, 'result': result}
+            self.save_storage_receipt(receipt_path, receipt)
+            if digest:
+                temporary.replace(destination); self.sync_directory(destination.parent)
+            data.update(resources); write_json(self.folder(identifier) / 'machine.json', data); self.sync_directory(self.folder(identifier))
+            return result
+        finally:
+            if not json.loads(receipt_path.read_text()).get('prepared'): temporary.unlink(missing_ok=True)
+
     def snapshot_manifest(self, identifier, snapshot_id):
         folder = self.storage_path(identifier, snapshot_id)
         manifest = json.loads((folder / 'manifest.json').read_text())
@@ -508,6 +589,14 @@ class Runner:
 
     def snapshot(self, identifier, payload):
         self.require_stopped(identifier)
+        return self._snapshot_contents(identifier, payload)
+
+    def _snapshot_contents(self, identifier, payload, guard=None, publish=True):
+        """Private checkpoint hook: caller owns machine lock and pause proof.
+        A callback checks its attempt/watchdog epoch throughout copying; a
+        resumed/re-paused VM must never falsely qualify a mixed raw copy.
+        """
+        if guard: guard()
         snapshot_id = payload['snapshot_id']
         folder = self.storage_path(identifier, snapshot_id)
         if (folder / 'manifest.json').exists(): return self.snapshot_manifest(identifier, snapshot_id)
@@ -518,15 +607,35 @@ class Runner:
         with source.open('rb') as disk, target.open('wb') as raw:
             with gzip.GzipFile(fileobj=raw, mode='wb', compresslevel=1, mtime=0) as compressed:
                 for chunk in iter(lambda: disk.read(1024 * 1024), b''):
+                    if guard: guard()
                     digest.update(chunk); compressed.write(chunk)
             raw.flush(); os.fsync(raw.fileno())
-        target.replace(folder / 'disk.gz')
+        if guard: guard()
         manifest = {'id': snapshot_id, 'format': 'mola-raw-gzip-v1', 'architecture': self.arch,
                     'image_ref': self.metadata(identifier).get('image_ref', getattr(self, 'default_image_ref', 'omarchy-agent:0.1.0')),
                     'size_bytes': source.stat().st_size, 'sha256': digest.hexdigest(),
-                    'artifact_bytes': (folder / 'disk.gz').stat().st_size,
-                    'artifact_sha256': self.file_digest(folder / 'disk.gz'), 'created_at': int(time.time())}
+                    'artifact_bytes': target.stat().st_size,
+                    'artifact_sha256': self.file_digest(target), 'created_at': int(time.time())}
+        if guard: guard()
+        if publish: return self._publish_snapshot(identifier, payload, manifest, guard)
+        write_json(folder / 'manifest.json.pending', manifest)
+        self.sync_directory(folder)
+        return manifest
+
+    def _publish_snapshot(self, identifier, payload, manifest, guard=None):
+        """Seal only after the checkpoint coordinator proves resume and thaw."""
+        if guard: guard()
+        folder = self.storage_path(identifier, payload['snapshot_id'])
+        target = folder / 'disk.gz.partial'
+        if not target.is_file():
+            if (folder / 'manifest.json').exists(): return self.snapshot_manifest(identifier, payload['snapshot_id'])
+            raise ValueError('Snapshot staging artifact is missing')
+        if self.file_digest(target) != manifest['artifact_sha256'] or target.stat().st_size != manifest['artifact_bytes']:
+            raise ValueError('Snapshot staging checksum mismatch')
+        if guard: guard()
+        target.replace(folder / 'disk.gz')
         write_json(folder / 'manifest.json', manifest)
+        (folder / 'manifest.json.pending').unlink(missing_ok=True)
         self.sync_directory(folder)
         return manifest
 
@@ -773,7 +882,7 @@ class Runner:
                     if generation < prior['generation']: raise StorageConflict('Stale storage generation')
                     if prior['status'] == 'pending':
                         raise StorageConflict('A pending storage operation must be reconciled first')
-                if verb in ('snapshot', 'restore'): self.require_stopped(identifier)
+                if verb in ('snapshot', 'restore', 'resize'): self.require_stopped(identifier)
                 receipt = {'operation_id': operation_id, 'verb': verb, 'generation': generation,
                            'fingerprint': fingerprint, 'incarnation': self.storage_incarnation(identifier), 'payload': payload, 'status': 'pending', 'created_at': time.time()}
                 # The journal is the source of truth for an accepted request;
@@ -821,13 +930,17 @@ class Runner:
             try:
                 if receipt['incarnation'] != self.storage_incarnation(identifier): raise StorageConflict('Operation belongs to a retired disk incarnation')
                 payload = dict(receipt['payload'])
-                if receipt['verb'] == 'restore': payload['_receipt_path'] = path
+                if receipt['verb'] in ('restore', 'resize', 'checkpoint'): payload['_receipt_path'] = path
                 result = self.storage_operation(identifier, receipt['verb'], payload)
                 with self.storage_state():
                     receipt = json.loads(path.read_text())
                     receipt.update(status='completed', result=result, completed_at=time.time())
                     self.save_storage_receipt(path, receipt)
             except Exception as error:
+                if isinstance(error, _checkpoint_module.CheckpointRecoveryPending):
+                    # Guardians may still be releasing the frozen guest. The
+                    # original receipt remains authoritative and owns admission.
+                    return
                 if isinstance(error, subprocess.TimeoutExpired) and platform.system() != 'Windows' and hasattr(self, 'lease'):
                     # subprocess.run kills only its direct helper on timeout.
                     # A nested writer can still own a staging disk. Leave the
@@ -851,10 +964,10 @@ class Runner:
                 print('Storage operation failed: ' + type(error).__name__, flush=True)
 
     def storage_operation(self, identifier, verb, payload):
-        operations = {'snapshot': self.snapshot, 'restore': self.restore_snapshot,
+        operations = {'snapshot': self.snapshot, 'checkpoint': self.checkpoint, 'restore': self.restore_snapshot,
                       'snapshot-delete': self.delete_snapshot, 'snapshot-import': self.import_snapshot,
                       'snapshot-write': self.write_snapshot_chunk, 'snapshot-seal': self.seal_snapshot,
-                      'snapshot-read': self.read_snapshot_chunk, 'fence': self.fence}
+                      'snapshot-read': self.read_snapshot_chunk, 'fence': self.fence, 'resize': self.resize}
         return operations[verb](identifier, payload)
 
     def list(self):
@@ -893,6 +1006,8 @@ class Handler(BaseHTTPRequestHandler):
             # responsive supervisor must not look dead during that work.
             if self.command == 'GET' and parts == ['health']:
                 return self.reply(200, {'ready': True, 'architecture': runner.arch, 'accelerator': runner.accel})
+            if self.command == 'GET' and parts == ['capabilities']:
+                return self.reply(200, runner.capabilities())
             if self.command == 'GET' and parts == ['machines']:
                 return self.reply(200, runner.list())
             if self.command == 'GET' and len(parts) == 2 and parts[0] == 'machines':

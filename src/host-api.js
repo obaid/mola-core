@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { statePath } from './paths.js';
-import { authorised, validateSpec, validateAction } from './api.js';
+import { authorised, validateSpec, validateAction, validateDisplay } from './api.js';
 import { revokeDesktop } from './desktop.js';
 import { handleSsh, revokeSsh } from './ssh.js';
 import { CuaSessions, revokeCua } from './cua.js';
@@ -9,6 +9,7 @@ import { storageOperation, storageReceipt, STORAGE_VERBS } from './host-storage.
 import { revokeDataPlane } from './data-plane.js';
 import { installedImages } from './installed-images.js';
 import { validateBrowserProxy } from './browser-proxy.js';
+import { GuestTools, COMPUTER_TOOLS } from './guest-tools.js';
 
 const fail = (status, message, code) => { throw Object.assign(new Error(message), { status, code }); };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -48,6 +49,7 @@ export function hostDescription(record, runtime, settledOperationKey = null) {
     id: record.id, name: record.name, status, disk_id: runtime?.disk_id ?? record.id,
     generation: record.cloud.generation, fenced: Boolean(record.cloud.fenced), image_ref: record.cloud.image_ref,
     vcpus: record.vcpus, memory_mb: record.memory_mb, disk_gb: record.disk_gb,
+    ...(record.display ? { display: record.display } : {}),
     ready, boot_id: record.boot_id ?? null, capabilities: caps ?? null,
     last_heartbeat_at: record.last_heartbeat_at ?? null,
   };
@@ -58,8 +60,8 @@ export function hostDescription(record, runtime, settledOperationKey = null) {
  * Tombstones and results are retained to fence delayed messages after deletion.
  */
 export class HostApi {
-  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', images = installedImages(), desktop, action, session, tunnel, snapshotTransfer = null, cua = new CuaSessions() }) {
-    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, session, tunnel, snapshotTransfer, cua });
+  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', images = installedImages(), desktop, action, session, tunnel, snapshotTransfer = null, cua = new CuaSessions(), guestTools = new GuestTools() }) {
+    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, session, tunnel, snapshotTransfer, cua, guestTools });
     this.locks = new Map();
     this.images = images;
   }
@@ -96,6 +98,9 @@ export class HostApi {
     if (!authorised(request, this.token)) fail(401, 'Unauthenticated.');
     if (request.headers.origin) fail(403, 'Browser origins are not accepted.');
     const method = request.method;
+    if (method === 'GET' && parts.length === 1 && parts[0] === 'capabilities') {
+      return { status: 200, body: { data: await this.runtime.capabilities() } };
+    }
     if (method === 'GET' && parts.length === 1 && parts[0] === 'images') {
       return { status: 200, body: { data: [...new Set([this.imageRef, ...Object.keys(this.images)])].map(image_ref => ({ image_ref })) } };
     }
@@ -106,6 +111,45 @@ export class HostApi {
     }
     if (method === 'GET' && parts.length === 2) {
       return { status: 200, body: { data: await this.describe(this.record(parts[1])) } };
+    }
+    if (method === 'POST' && parts.length === 3 && (COMPUTER_TOOLS[parts[2]] || ['geometry', 'capture', 'vault-inject', 'view-input'].includes(parts[2]))) {
+      return this.locked(parts[1], async () => {
+        const record = this.record(parts[1]);
+        if (parts[2] === 'network-tools' && body.tool === 'network_configure') {
+          const supplied = body.arguments?.browser_proxy;
+          const proxy = supplied && Object.fromEntries(['provider', 'host', 'port', 'username', 'password'].map(k => [k, supplied[k]]));
+          try { validateBrowserProxy(proxy, record.cloud.image_ref); }
+          catch { fail(400, 'Invalid managed browser proxy configuration.'); }
+        }
+        const viewer = parts[2] === 'capture' || parts[2] === 'view-input' || body.tool === 'viewer_input' || body.tool === 'window_identity' || parts[2] === 'network-tools';
+        const suppliedGeneration = body.expected_generation ?? body.arguments?.expected_generation;
+        const expectedGeneration = typeof suppliedGeneration === 'string' && /^[0-9]{1,16}$/.test(suppliedGeneration)
+          ? Number(suppliedGeneration) : suppliedGeneration;
+        if (viewer && (!Number.isSafeInteger(expectedGeneration) || expectedGeneration !== record.cloud.generation)) fail(409, 'Viewer belongs to a previous generation.', 'viewer_generation_mismatch');
+        if (suppliedGeneration !== undefined && (!Number.isSafeInteger(expectedGeneration) || expectedGeneration !== record.cloud.generation)) fail(409, 'Tool belongs to a previous generation.', 'computer_generation_mismatch');
+        if (parts[2] === 'vault-inject' && suppliedGeneration !== undefined && (!Number.isSafeInteger(expectedGeneration) || expectedGeneration !== record.cloud.generation)) fail(409, 'Vault injection belongs to a previous generation.', 'vault_generation_mismatch');
+        const target = await this.runtime.describe(record.id);
+        if (!hostDescription(record, target).ready) fail(409, 'Machine is not ready.');
+        const binding = { generation: record.cloud.generation, boot_id: record.boot_id };
+        const data = await this.guestTools.run(record.id, target, parts[2], body, binding);
+        if (record.cloud.generation !== binding.generation || record.boot_id !== binding.boot_id || record.cloud.deleted) fail(409, 'Computer boot changed during tool execution.', 'tool_boot_changed');
+        if (parts[2] === 'geometry' && (body.width !== undefined || body.height !== undefined)) {
+          let display; try { display = validateDisplay(body); } catch { fail(400, 'Invalid display dimensions.'); }
+          if (data.width !== display.width || data.height !== display.height) fail(502, 'Guest display change was not confirmed.');
+          record.display = display; record.cloud.create_spec.display = display; this.registry.flush();
+        }
+        if (parts[2] === 'network-tools' && ['network_configure', 'network_teardown'].includes(body.tool)) {
+          record.cloud.create_spec.browser_proxy = body.tool === 'network_teardown' ? null
+            : Object.fromEntries(['provider', 'host', 'port', 'username', 'password'].map(k => [k, body.arguments.browser_proxy[k]]));
+          record.cloud.network_binding = body.tool === 'network_teardown' ? null : {
+            configuration_id: body.arguments.browser_proxy.configuration_id, country: body.arguments.browser_proxy.country,
+            operation_id: body.arguments.operation_id,
+          };
+          this.registry.flush();
+        }
+        if (parts[2] === 'network-tools') { data.runtime_generation = binding.generation; data.boot_id = binding.boot_id; }
+        return { status: 200, body: { data } };
+      });
     }
     if (method === 'GET' && parts.length === 3 && parts[2] === 'cua') {
       if (!UUID.test(parts[1] || '')) fail(400, 'id must be a UUID.');
@@ -208,7 +252,7 @@ export class HostApi {
     if (!Number.isSafeInteger(body.generation) || body.generation < 1) fail(400, 'generation must be a positive integer.');
     if (typeof body.operation_id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.operation_id)) fail(400, 'operation_id is required (letters, numbers, underscores or hyphens; maximum 128).');
     const allowed = verb === 'create'
-      ? ['id', 'name', 'vcpus', 'memory_mb', 'disk_gb', 'image_ref', 'operation_id', 'generation', 'recreate', 'browser_proxy']
+      ? ['id', 'name', 'vcpus', 'memory_mb', 'disk_gb', 'image_ref', 'operation_id', 'generation', 'recreate', 'browser_proxy', 'display']
       : ['operation_id', 'generation', ...(verb === 'destroy' ? ['delete_disk'] : [])];
     if (Object.keys(body).some(key => !allowed.includes(key))) fail(400, 'Unknown operation field.');
     if (verb === 'create' && Object.hasOwn(body, 'recreate') && typeof body.recreate !== 'boolean') fail(400, 'recreate must be a boolean.');
@@ -217,6 +261,7 @@ export class HostApi {
     if (verb === 'create') {
       if (!['vcpus', 'memory_mb', 'disk_gb'].every(key => Number.isInteger(body[key])) || typeof body.name !== 'string' || !body.name.trim()) fail(400, 'A name and integer resource sizes are required.');
       try { spec = validateSpec(body); } catch (error) { fail(400, error.message); }
+      if (spec.display && !body.image_ref?.startsWith('ubuntu-xfce:')) fail(501, 'Display configuration is qualified for Ubuntu XFCE only.', 'display_configuration_unsupported');
       try {
         const proxy = validateBrowserProxy(body.browser_proxy, body.image_ref);
         if (proxy) spec.browser_proxy = proxy;
@@ -318,6 +363,10 @@ export class HostApi {
       }
       record.desired_state = 'running';
       this.registry.flush();
+      if (record.display && described.status === 'stopped') {
+        await this.runtime.reseed(id, { registration_token: record.registration_token, authorized_keys: record.authorized_keys,
+          name: record.name, display: record.display });
+      }
       try {
         await this.runtime.startMachine(id);
       } catch (error) {

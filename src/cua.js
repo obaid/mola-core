@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { statePath } from './paths.js';
+import { serializedComputerTool } from './tool-locks.js';
 
 // Management, configuration, local file export, and policy tools stay inside
 // the guest. The public API exposes the interactive computer-use surface.
@@ -166,7 +167,7 @@ export class CuaSessions {
     if (!entry.tools.has(tool)) fail(400, 'Cua tool is unavailable or not exposed by Mola.');
     if (args === null || typeof args !== 'object' || Array.isArray(args)) fail(400, 'arguments must be an object.');
     renew(sessionId, entry);
-    try { return await entry.mcp.send('tools/call', { name: tool, arguments: args }); }
+    try { return await serializedComputerTool(machineId, () => entry.mcp.send('tools/call', { name: tool, arguments: args })); }
     catch (error) { if (entry.mcp.closed) evict(sessionId, entry); throw error; }
   }
 

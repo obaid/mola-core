@@ -12,6 +12,7 @@ import { attachSsh } from './ssh.js';
 import { SnapshotTransfer } from './snapshot-transfer.js';
 import { attachDataPlane, getDataPlaneMetrics, mintActionTicket, mintTunnelTicket, revokeDataPlane } from './data-plane.js';
 import { CuaRollout } from './cua-rollout.js';
+import { GuestTools, COMPUTER_TOOLS } from './guest-tools.js';
 
 const json = (response, status, body) => {
   const payload = JSON.stringify(body, null, 2);
@@ -31,7 +32,7 @@ async function readBody(request, limit = 2 * 1024 * 1024) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export async function createServer({ host, port, registry = new Registry(), runtime = new Runtime(host), keys = guestKey() }) {
+export async function createServer({ host, port, registry = new Registry(), runtime = new Runtime(host), keys = guestKey(), guestTools = new GuestTools() }) {
   const guests = new GuestService(registry);
   const token = operatorToken();
   const validateLocalSession = async (id, binding) => {
@@ -43,7 +44,7 @@ export async function createServer({ host, port, registry = new Registry(), runt
       && present(record, described).status === 'ready';
   };
   const hostApi = new HostApi({
-    registry, runtime, publicKey: keys.publicKey, token: hostToken(token),
+    registry, runtime, guestTools, publicKey: keys.publicKey, token: hostToken(token),
     desktop: (id, described, binding) => ({
       desktop_url: `http://127.0.0.1:${port}/desktop#t=${mintTicket(id, described, {
         ...binding, validate: captured => hostApi.validateDesktop(id, captured),
@@ -237,6 +238,20 @@ export async function createServer({ host, port, registry = new Registry(), runt
       if (!record || record.cloud?.deleted) return json(response, 404, { message: 'No such machine.' });
       if (record.cloud && method !== 'GET') return json(response, 409, { message: 'Cloud-managed machines must use the private host API.' });
 
+      if (method === 'POST' && parts.length === 4 && (COMPUTER_TOOLS[parts[3]] || ['geometry', 'capture', 'vault-inject'].includes(parts[3]))) {
+        const target = await runtime.describe(record.id);
+        if (present(record, target).status !== 'ready') return json(response, 409, { message: 'Machine is not ready.' });
+        const binding = { generation: record.runtime_generation, boot_id: record.boot_id };
+        if (parts[3] === 'capture' && body.expected_generation !== binding.generation) return json(response, 409, { message: 'Capture belongs to a previous generation.' });
+        const result = await guestTools.run(record.id, target, parts[3], body, binding);
+        if (record.runtime_generation !== binding.generation || record.boot_id !== binding.boot_id) return json(response, 409, { message: 'Computer boot changed during tool execution.' });
+        if (parts[3] === 'geometry' && (body.width !== undefined || body.height !== undefined)) {
+          if (result.width !== body.width || result.height !== body.height) return json(response, 502, {message:'Display change was not confirmed.'});
+          registry.update(record.id,{display:{width:result.width,height:result.height}});
+        }
+        return json(response, 200, { data: result });
+      }
+
       if (method === 'GET' && parts.length === 3) {
         return json(response, 200, { data: present(record, await describe(record.id)) });
       }
@@ -265,6 +280,8 @@ export async function createServer({ host, port, registry = new Registry(), runt
         const verb = parts[3];
         if (verb === 'start') {
           revokeDataPlane(record.id);
+          if (record.display) await runtime.reseed(record.id, {registration_token:record.registration_token,
+            authorized_keys:record.authorized_keys,name:record.name,display:record.display});
           await runtime.startMachine(record.id);
           registry.update(record.id, { desired_state: 'running' });
           return json(response, 200, { data: present(registry.get(record.id), await describe(record.id)) });

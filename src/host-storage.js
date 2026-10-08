@@ -11,15 +11,16 @@ export const SNAPSHOT_CHUNK_ENCODED_BYTES = Math.ceil(SNAPSHOT_CHUNK_BYTES / 3) 
 // wire representation is twice the validated base64 length; validation below
 // still caps the decoded payload at exactly SNAPSHOT_CHUNK_BYTES.
 export const SNAPSHOT_CHUNK_BODY_BYTES = (2 * SNAPSHOT_CHUNK_ENCODED_BYTES) + (64 * 1024);
-const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
+const fail = (status, message, code) => { throw Object.assign(new Error(message), { status, ...(code ? { code } : {}) }); };
 const stable = value => JSON.stringify(value, (_, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
-export const STORAGE_VERBS = ['snapshot', 'restore', 'snapshot-delete', 'snapshot-import', 'snapshot-write', 'snapshot-read', 'snapshot-seal', 'snapshot-export', 'snapshot-import-direct', 'fence'];
+export const STORAGE_VERBS = ['snapshot', 'checkpoint', 'restore', 'snapshot-delete', 'snapshot-import', 'snapshot-write', 'snapshot-read', 'snapshot-seal', 'snapshot-export', 'snapshot-import-direct', 'fence', 'resize'];
 const fields = {
-  snapshot: ['snapshot_id'], restore: ['snapshot_id', 'fork'], 'snapshot-delete': ['snapshot_id'],
+  snapshot: ['snapshot_id'], checkpoint: ['snapshot_id'], restore: ['snapshot_id', 'fork'], 'snapshot-delete': ['snapshot_id'],
   'snapshot-import': ['snapshot_id', 'manifest'], 'snapshot-write': ['snapshot_id', 'offset', 'data', 'sha256'],
   'snapshot-read': ['snapshot_id', 'offset'], 'snapshot-seal': ['snapshot_id'],
   'snapshot-export': ['snapshot_id', 'grant'], 'snapshot-import-direct': ['snapshot_id', 'manifest', 'grant'], fence: [],
+  resize: ['vcpus', 'memory_mb', 'disk_gb'],
 };
 
 /** Durable intent for disk mutations; chunks use their offset and digest as an
@@ -28,7 +29,10 @@ export async function storageOperation(api, id, verb, body) {
   const record = api.record(id);
   const chunk = ['snapshot-write', 'snapshot-read', 'snapshot-export', 'snapshot-import-direct'].includes(verb);
   if (Object.keys(body).some(key => ![...fields[verb], ...(chunk ? [] : ['operation_id', 'generation'])].includes(key))) fail(400, 'Unknown storage operation field.');
-  if (verb !== 'fence' && !UUID.test(body.snapshot_id || '')) fail(400, 'snapshot_id must be a UUID.');
+  if (!['fence', 'resize'].includes(verb) && !UUID.test(body.snapshot_id || '')) fail(400, 'snapshot_id must be a UUID.');
+  if (verb === 'resize') {
+    if (!Number.isInteger(body.vcpus) || body.vcpus < 1 || body.vcpus > 8 || !Number.isInteger(body.memory_mb) || body.memory_mb < 1024 || body.memory_mb > 16384 || !Number.isInteger(body.disk_gb) || body.disk_gb < 16 || body.disk_gb > 1024) fail(400, 'Resize resources are invalid.');
+  }
   if (verb === 'restore' && Object.hasOwn(body, 'fork') && typeof body.fork !== 'boolean') fail(400, 'fork must be a boolean.');
   if (chunk) {
     if (['snapshot-export', 'snapshot-import-direct'].includes(verb)) {
@@ -58,9 +62,16 @@ export async function storageOperation(api, id, verb, body) {
     if (operation.result) return operation.result;
     if (record.cloud.generation !== body.generation) fail(409, 'Pending operation was superseded.');
   } else {
+    if (verb === 'checkpoint') {
+      if ((await api.runtime.capabilities()).running_checkpoint !== true) fail(501, 'Running checkpoint qualification is disabled.', 'running_checkpoint_unsupported');
+      const target = await api.runtime.describe(id);
+      if (target.status !== 'running' || !record.boot_id) fail(409, 'Running checkpoint requires an enrolled running computer.');
+      if (body.generation !== record.cloud.generation) fail(409, 'Checkpoint belongs to a different boot generation.');
+    }
+    if (verb === 'resize' && body.disk_gb < record.disk_gb) fail(400, 'Disk shrinking is unsupported.');
     if (body.generation < record.cloud.generation) fail(409, 'Stale boot generation.');
     if (Object.values(record.cloud.operations).some(value => !value.result)) fail(409, 'A pending operation must be reconciled first.');
-    if (['snapshot', 'restore'].includes(verb) && (await api.runtime.describe(id)).status !== 'stopped') fail(409, 'Stop the computer first.');
+    if (['snapshot', 'restore', 'resize'].includes(verb) && (await api.runtime.describe(id)).status !== 'stopped') fail(409, 'Stop the computer first.');
     record.cloud.generation = body.generation;
     record.runtime_generation = body.generation;
     operation = record.cloud.operations[key] = { fingerprint, verb, pending_at: new Date().toISOString() };
@@ -80,7 +91,7 @@ export async function storageOperation(api, id, verb, body) {
     }
     api.registry.flush();
   }
-  if (['restore', 'fence'].includes(verb)) { revokeDesktop(id); revokeSsh(id); revokeDataPlane(id); revokeCua(id); }
+  if (['restore', 'fence', 'resize'].includes(verb)) { revokeDesktop(id); revokeSsh(id); revokeDataPlane(id); revokeCua(id); }
   let data;
   if (operation.runtime_result) data = operation.runtime_result;
   else {
@@ -110,7 +121,13 @@ export async function storageOperation(api, id, verb, body) {
     api.registry.flush();
   }
   if (verb === 'restore') await reseedRestore(api, id, record);
-  const result = { status: verb === 'snapshot' ? 201 : 200, body: { data } };
+  if (verb === 'checkpoint' && (data.checkpoint_operation_id !== body.operation_id || !UUID.test(data.checkpoint_attempt || '')
+    || data.consistency !== 'filesystem' || data.running_resumed !== true || data.filesystem_thawed !== true)) fail(502, 'Checkpoint release proof is incomplete.');
+  if (verb === 'resize') {
+    if (data.id !== id || data.status !== 'stopped' || !['vcpus', 'memory_mb', 'disk_gb'].every(k => data[k] === body[k])) fail(502, 'Invalid native resize result.');
+    for (const field of ['vcpus', 'memory_mb', 'disk_gb']) { record[field] = data[field]; record.cloud.create_spec[field] = data[field]; }
+  }
+  const result = { status: ['snapshot', 'checkpoint'].includes(verb) ? 201 : 200, body: { data } };
   operation.result = result;
   api.registry.flush();
   return result;
@@ -136,5 +153,6 @@ function reseedRestore(api, id, record) {
   return api.runtime.reseed(id, {
     registration_token: record.registration_token, authorized_keys: record.authorized_keys, name: record.name,
     browser_proxy: record.cloud.create_spec?.browser_proxy ?? null,
+    network_binding: record.cloud.network_binding ?? null,
   });
 }

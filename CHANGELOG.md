@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.0 — 2026-10-08
+
+- Add authenticated guest browser/app/session tools with persistent Chrome
+  profiles, full/headless modes, bounded CDP snapshot references and periodic
+  restore-first session saves.
+- Add private URL-bound password/TOTP and focused-app secret injection, source
+  window/tab cropping and scoped viewer input. Secrets use SSH stdin.
+- Add durable typed installers, portable version activation/pins/rollback,
+  display geometry and stopped disk/resource growth with replayable receipts.
+- Add qualified running filesystem checkpoints with independent resume/thaw
+  watchdogs and durable uncertainty fences. No process-memory capture is claimed.
+- Extend managed proxy scope/counters and remove inherited credentials from
+  clone staging. Paid services and TLS unlock require separate qualification.
+- Document host/local route boundaries and measured browser-mode limitations.
+
 ## 1.8.0 — 2026-10-08
 
 - Run private host storage commands with durable, generation-bound receipts.

@@ -80,7 +80,14 @@ export function validateSpec(body) {
   if (vcpus < 1 || vcpus > 8) throw new Error('vcpus must be between 1 and 8.');
   if (memory_mb < 1024 || memory_mb > 16384) throw new Error('memory_mb must be between 1024 and 16384.');
   if (disk_gb < 16 || disk_gb > 1024) throw new Error('disk_gb must be between 16 and 1024.');
-  return { name, vcpus, memory_mb, disk_gb };
+  return { name, vcpus, memory_mb, disk_gb, ...(Object.hasOwn(body || {}, 'display') ? { display: validateDisplay(body.display) } : {}) };
+}
+
+export function validateDisplay(display) {
+  if (!display || typeof display !== 'object' || Array.isArray(display) || Object.keys(display).some(k => !['width', 'height'].includes(k))
+    || !Number.isInteger(display.width) || !Number.isInteger(display.height) || display.width < 640 || display.width > 3840 || display.height < 480 || display.height > 2160
+    || display.width * display.height > 8294400) throw new Error('display requires width 640..3840 and height 480..2160.');
+  return { width: display.width, height: display.height };
 }
 
 export function validateLocalSpec(body, images = installedImages(), defaultRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0') {
@@ -97,6 +104,8 @@ export function validateAction(body) {
   const action = body?.action;
   if (!ACTIONS.has(action)) throw new Error(`action must be one of: ${[...ACTIONS].join(', ')}`);
   if (action === 'exec' && typeof body.command !== 'string') throw new Error('exec requires a command string.');
+  if (Object.hasOwn(body, 'job_run_id') && (typeof body.job_run_id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.job_run_id))) throw new Error('job_run_id must be a bounded operation identity.');
+  if (Object.hasOwn(body, 'payload') && Buffer.byteLength(JSON.stringify(body.payload)) > 1024 * 1024) throw new Error('Job payload exceeds 1 MiB.');
   if ((action === 'read_file' || action === 'write_file') && typeof body.path !== 'string') throw new Error('path is required.');
   if (action === 'write_file') {
     const text = typeof body.content === 'string';
