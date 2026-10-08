@@ -23,6 +23,14 @@ import subprocess
 import threading
 import time
 
+OPERATION_ID = re.compile(r'[a-zA-Z0-9_-]{1,128}')
+DURABLE_STORAGE_VERBS = ('snapshot', 'restore', 'snapshot-delete', 'snapshot-import', 'snapshot-seal', 'fence')
+
+
+class StorageConflict(ValueError):
+    pass
+
+
 ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SNAPSHOT_CHUNK_BYTES = 8 * 1024 * 1024
 SNAPSHOT_CHUNK_ENCODED_BYTES = 11184812
@@ -139,6 +147,8 @@ class Runner:
         self.machine_locks = {}
         self.machine_locks_guard = threading.Lock()
         self.processes = {}
+        self.storage_guard = threading.RLock()
+        self.storage_workers = {}
 
     def selected_image(self, data):
         ref = data.get('image_ref', getattr(self, 'default_image_ref', 'omarchy-agent:0.1.0'))
@@ -346,6 +356,7 @@ class Runner:
         ssh_port, vnc_port, qmp_port = sorted(ports)
         data = {'managed_by': 'mola-native-v1', 'id': identifier, 'vcpus': cpus, 'memory_mb': memory,
                 'ssh_port': ssh_port, 'vnc_port': vnc_port, 'qmp_port': qmp_port, 'create_fingerprint': fingerprint,
+                'storage_incarnation': secrets.token_hex(16), 'storage_generation': spec.get('incarnation_generation', 0),
                 'image_ref': spec.get('image_ref', getattr(self, 'default_image_ref', 'omarchy-agent:0.1.0'))}
         write_json(folder / 'machine.json', data)
         folder.rename(destination)
@@ -476,6 +487,14 @@ class Runner:
             raise ValueError('Unsafe snapshot directory')
         return folder
 
+    def create_storage_directory(self, folder):
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # mkdir(parents=True) can create snapshots/, machine/ and snapshot/.
+        # Fsync all containing directories before any receipt can acknowledge
+        # an artifact under this namespace, including the root link itself.
+        for parent in (folder.parent, folder.parent.parent, self.root):
+            self.sync_directory(parent)
+
     def require_stopped(self, identifier):
         if self.status(self.metadata(identifier)) != 'stopped':
             raise ValueError('Stop the computer before changing its disk')
@@ -492,7 +511,7 @@ class Runner:
         snapshot_id = payload['snapshot_id']
         folder = self.storage_path(identifier, snapshot_id)
         if (folder / 'manifest.json').exists(): return self.snapshot_manifest(identifier, snapshot_id)
-        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.create_storage_directory(folder)
         source = self.folder(identifier) / 'root.ext4'
         target = folder / 'disk.gz.partial'
         digest = hashlib.sha256()
@@ -523,6 +542,21 @@ class Runner:
         folder = self.storage_path(identifier, payload['snapshot_id'])
         manifest = self.snapshot_manifest(identifier, payload['snapshot_id'])
         self.validate_snapshot_manifest(identifier, manifest)
+        receipt_path = payload.get('_receipt_path')
+        if receipt_path:
+            receipt = json.loads(receipt_path.read_text())
+            prepared = receipt.get('prepared')
+            if prepared:
+                destination = self.folder(identifier) / 'root.ext4'
+                temporary = destination.with_suffix('.restore')
+                if temporary.exists():
+                    if self.file_digest(temporary) != prepared['sha256']: raise ValueError('Prepared restore checksum mismatch')
+                    self.require_stopped(identifier)
+                    temporary.replace(destination)
+                    self.sync_directory(destination.parent)
+                elif self.file_digest(destination) != prepared['sha256']:
+                    raise ValueError('Interrupted restore could not establish its commit')
+                return prepared['result']
         if self.file_digest(folder / 'disk.gz') != manifest['artifact_sha256']:
             raise ValueError('Snapshot artifact checksum mismatch')
         destination = self.folder(identifier) / 'root.ext4'
@@ -545,19 +579,39 @@ class Runner:
                 # first, then refresh only the operator-managed guest agent.
                 subprocess.run(['python3', str(Path(__file__).with_name('refresh_guest_agent.py')),
                                 '--image', self.selected_image(self.metadata(identifier))['path'], '--disk', str(temporary), '--architecture', self.arch],
-                               check=True, capture_output=True, timeout=900)
+                               check=True, capture_output=True, timeout=900, **self.storage_subprocess_options())
                 with temporary.open('rb') as stream: os.fsync(stream.fileno())
             if payload.get('fork', False):
                 subprocess.run(['python3', str(Path(__file__).with_name('sanitize_clone.py')),
-                                '--disk', str(temporary)], check=True, capture_output=True, timeout=300)
+                                '--disk', str(temporary)], check=True, capture_output=True, timeout=300, **self.storage_subprocess_options())
                 with temporary.open('rb') as stream: os.fsync(stream.fileno())
             self.require_stopped(identifier)
+            if receipt_path:
+                result = {'id': identifier, 'snapshot_id': manifest['id'], 'status': 'stopped',
+                          'snapshot_sha256': manifest['sha256'], 'guest_agent_refreshed': bool(self.config.get('guest_agent_refresh', False)),
+                          'fork_identity_reset': bool(payload.get('fork', False))}
+                prepared_digest = self.file_digest(temporary)
+                with self.storage_state():
+                    receipt = json.loads(receipt_path.read_text())
+                    receipt['prepared'] = {'sha256': prepared_digest, 'result': result}
+                    self.save_storage_receipt(receipt_path, receipt)
             temporary.replace(destination)
             self.sync_directory(destination.parent)
-        finally: temporary.unlink(missing_ok=True)
+        finally:
+            if not receipt_path or not json.loads(receipt_path.read_text()).get('prepared'):
+                temporary.unlink(missing_ok=True)
         return {'id': identifier, 'snapshot_id': manifest['id'], 'status': 'stopped',
                 'snapshot_sha256': manifest['sha256'], 'guest_agent_refreshed': bool(self.config.get('guest_agent_refresh', False)),
                 'fork_identity_reset': bool(payload.get('fork', False))}
+
+    def storage_subprocess_options(self):
+        # A transform can outlive a terminated supervisor. On POSIX inherit its
+        # open-file lease so a replacement supervisor cannot touch the staging
+        # disk until that transform (and its disk subprocesses) has finished.
+        if platform.system() != 'Windows' and hasattr(self, 'lease'):
+            return {'pass_fds': (self.lease.fileno(),),
+                    'env': {**os.environ, 'MOLA_STORAGE_LEASE_FD': str(self.lease.fileno())}}
+        return {}
 
     @staticmethod
     def sync_directory(path):
@@ -590,12 +644,14 @@ class Runner:
         if (folder / 'manifest.json').exists():
             if self.snapshot_manifest(identifier, snapshot_id) != manifest: raise ValueError('Snapshot already exists with different content')
             return {'offset': manifest['artifact_bytes'], 'complete': True}
-        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.create_storage_directory(folder)
         intent = folder / 'import.json'
         if intent.exists() and json.loads(intent.read_text()) != manifest: raise ValueError('Import already holds a different manifest')
         write_json(intent, manifest)
         target = folder / 'upload.partial'
         target.touch(mode=0o600, exist_ok=True)
+        with target.open('rb') as stream: os.fsync(stream.fileno())
+        self.sync_directory(folder)
         return {'offset': target.stat().st_size, 'complete': False}
 
     def write_snapshot_chunk(self, identifier, payload):
@@ -646,6 +702,7 @@ class Runner:
     def delete_snapshot(self, identifier, payload):
         folder = self.storage_path(identifier, payload['snapshot_id'])
         if folder.exists(): shutil.rmtree(folder)
+        if folder.parent.exists(): self.sync_directory(folder.parent)
         return {'id': payload['snapshot_id'], 'deleted': True}
 
     def fence(self, identifier, payload):
@@ -658,6 +715,140 @@ class Runner:
             if self.status(self.metadata(identifier)) == 'stopped': return {'id': identifier, 'fenced': True, 'status': 'stopped'}
             time.sleep(0.1)
         raise ValueError('Fencing has not established stopped state')
+
+    def storage_incarnation(self, identifier):
+        data = self.metadata(identifier)
+        # Existing disks predate receipt namespaces. Their immutable create
+        # fingerprint identifies that incarnation; new creates get a random ID.
+        incarnation = data.get('storage_incarnation') or data.get('create_fingerprint') or 'legacy'
+        if not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', incarnation): raise ValueError('Invalid storage incarnation')
+        return incarnation
+
+    def storage_journal(self, identifier):
+        folder = self.root / 'storage-operations' / identifier / self.storage_incarnation(identifier)
+        if any(path.is_symlink() for path in (folder, folder.parent, folder.parent.parent)): raise ValueError('Unsafe storage journal')
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.sync_directory(folder.parent)
+        self.sync_directory(folder.parent.parent)
+        self.sync_directory(self.root)
+        return folder
+
+    def operation_path(self, identifier, verb, operation_id):
+        if verb not in DURABLE_STORAGE_VERBS or not isinstance(operation_id, str) or not OPERATION_ID.fullmatch(operation_id):
+            raise ValueError('Invalid storage operation identity')
+        return self.storage_journal(identifier) / (verb + '-' + operation_id + '.json')
+
+    def storage_state(self):
+        # Tiny test runners omit process setup. Initialization happens before
+        # their HTTP server starts; production initializes in the constructor.
+        if not hasattr(self, 'storage_guard'):
+            self.storage_guard, self.storage_workers = threading.RLock(), {}
+        return self.storage_guard
+
+    def save_storage_receipt(self, path, receipt):
+        write_json(path, receipt)
+        self.sync_directory(path.parent)
+
+    def storage_receipt(self, identifier, verb, operation_id):
+        path = self.operation_path(identifier, verb, operation_id)
+        with self.storage_state():
+            receipt = json.loads(path.read_text())
+            # Never expose the persisted request or stage paths on the wire.
+            return {key: receipt[key] for key in ('operation_id', 'verb', 'generation', 'status', 'result', 'error', 'error_status') if key in receipt}
+
+    def submit_storage(self, identifier, verb, payload):
+        operation_id, generation = payload.get('operation_id'), payload.get('generation')
+        if type(generation) is not int or generation < 1: raise ValueError('Invalid storage generation')
+        path = self.operation_path(identifier, verb, operation_id)
+        fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        with self.storage_state():
+            data = self.metadata(identifier)
+            if path.exists():
+                receipt = json.loads(path.read_text())
+                if receipt['fingerprint'] != fingerprint: raise StorageConflict('Operation ID was already used with a different payload')
+            else:
+                if generation < data.get('storage_generation', 0): raise StorageConflict('Stale storage generation')
+                for previous in path.parent.glob('*.json'):
+                    prior = json.loads(previous.read_text())
+                    if generation < prior['generation']: raise StorageConflict('Stale storage generation')
+                    if prior['status'] == 'pending':
+                        raise StorageConflict('A pending storage operation must be reconciled first')
+                if verb in ('snapshot', 'restore'): self.require_stopped(identifier)
+                receipt = {'operation_id': operation_id, 'verb': verb, 'generation': generation,
+                           'fingerprint': fingerprint, 'incarnation': self.storage_incarnation(identifier), 'payload': payload, 'status': 'pending', 'created_at': time.time()}
+                # The journal is the source of truth for an accepted request;
+                # persist it before scheduling any work or acknowledging it.
+                self.save_storage_receipt(path, receipt)
+                data['storage_generation'] = generation
+                write_json(self.folder(identifier) / 'machine.json', data)
+                self.sync_directory(self.folder(identifier))
+            if receipt['status'] == 'pending': self.launch_storage_worker(identifier, path)
+            return self.storage_receipt(identifier, verb, operation_id)
+
+    def launch_storage_worker(self, identifier, path):
+        key = str(path)
+        if key in self.storage_workers and self.storage_workers[key].is_alive(): return
+        worker = threading.Thread(target=self.run_storage_worker, args=(identifier, path), daemon=True)
+        self.storage_workers[key] = worker
+        worker.start()
+
+    def recover_storage_operations(self):
+        with self.storage_state():
+            root = self.root / 'storage-operations'
+            if not root.exists(): return
+            for folder in root.iterdir():
+                if not ID.fullmatch(folder.name): continue
+                try: incarnation = self.storage_incarnation(folder.name)
+                except FileNotFoundError: continue # Deleted incarnation receipts are tombstones.
+                for path in (folder / incarnation).glob('*.json'):
+                    receipt = json.loads(path.read_text())
+                    if receipt['status'] == 'pending' and receipt['incarnation'] == incarnation:
+                        self.launch_storage_worker(folder.name, path)
+
+    def require_no_pending_storage(self, identifier):
+        with self.storage_state():
+            try: folder = self.storage_journal(identifier)
+            except FileNotFoundError: return
+            if folder.exists() and any(json.loads(path.read_text())['status'] == 'pending' for path in folder.glob('*.json')):
+                raise StorageConflict('A pending storage operation must be reconciled first')
+
+    def run_storage_worker(self, identifier, path):
+        # No global runner lock is held during compression, verification or
+        # restore. Same-machine lifecycle work uses this same mutation lock.
+        with self.machine_lock(identifier):
+            with self.storage_state(): receipt = json.loads(path.read_text())
+            if receipt['status'] != 'pending': return
+            try:
+                if receipt['incarnation'] != self.storage_incarnation(identifier): raise StorageConflict('Operation belongs to a retired disk incarnation')
+                payload = dict(receipt['payload'])
+                if receipt['verb'] == 'restore': payload['_receipt_path'] = path
+                result = self.storage_operation(identifier, receipt['verb'], payload)
+                with self.storage_state():
+                    receipt = json.loads(path.read_text())
+                    receipt.update(status='completed', result=result, completed_at=time.time())
+                    self.save_storage_receipt(path, receipt)
+            except Exception as error:
+                if isinstance(error, subprocess.TimeoutExpired) and platform.system() != 'Windows' and hasattr(self, 'lease'):
+                    # subprocess.run kills only its direct helper on timeout.
+                    # A nested writer can still own a staging disk. Leave the
+                    # accepted journal pending and fail closed by terminating
+                    # this supervisor: none of its threads can admit another
+                    # restore, and inherited leases exclude a replacement until
+                    # every surviving writer exits. Recovery resumes unfinished
+                    # preparation only after a fresh supervisor acquires lease.
+                    os._exit(75)
+                with self.storage_state():
+                    receipt = json.loads(path.read_text())
+                    if receipt.get('prepared') and isinstance(error, OSError):
+                        # The swap may have committed. Preserve its evidence and
+                        # allow an exact retry to verify the disk instead of
+                        # claiming a failure or repeating decompression.
+                        return
+                    receipt.update(status='failed', error=str(error) if isinstance(error, (ValueError, FileNotFoundError)) else 'Native storage operation failed; inspect host logs',
+                                   error_status=409 if isinstance(error, StorageConflict) else 422 if isinstance(error, (ValueError, KeyError, TypeError)) else 404 if isinstance(error, FileNotFoundError) else 503,
+                                   completed_at=time.time())
+                    self.save_storage_receipt(path, receipt)
+                print('Storage operation failed: ' + type(error).__name__, flush=True)
 
     def storage_operation(self, identifier, verb, payload):
         operations = {'snapshot': self.snapshot, 'restore': self.restore_snapshot,
@@ -706,11 +897,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, runner.list())
             if self.command == 'GET' and len(parts) == 2 and parts[0] == 'machines':
                 return self.reply(200, runner.describe(parts[1]))
+            if self.command == 'GET' and len(parts) == 5 and parts[0] == 'machines' and parts[2] == 'storage-operations':
+                receipt = runner.storage_receipt(parts[1], parts[3], parts[4])
+                return self.reply(202 if receipt['status'] == 'pending' else 200, {'storage_operation': receipt})
+            if self.command == 'POST' and len(parts) == 3 and parts[0] == 'machines' and parts[2] in DURABLE_STORAGE_VERBS and 'operation_id' in payload:
+                receipt = runner.submit_storage(parts[1], parts[2], payload)
+                return self.reply(202 if receipt['status'] == 'pending' else 200, {'storage_operation': receipt})
             identifier = payload.get('computer_id') if parts == ['machines'] and self.command == 'POST' else (parts[1] if len(parts) >= 2 and parts[0] == 'machines' else None)
+            if identifier is not None and self.command in ('POST', 'DELETE'):
+                runner.require_no_pending_storage(identifier)
             machine_lock = runner.machine_lock(identifier) if identifier is not None else threading.RLock()
             # Keep host resource allocation serialized while readers for other
             # computers remain responsive during a large snapshot or restore.
             with machine_lock, runner.lock:
+                if identifier is not None and self.command in ('POST', 'DELETE'):
+                    runner.require_no_pending_storage(identifier)
                 if parts == ['machines'] and self.command == 'POST': result = runner.create(payload)
                 elif len(parts) == 4 and parts[0] == 'machines' and parts[2] == 'snapshots' and self.command == 'GET': result = runner.snapshot_manifest(parts[1], parts[3])
                 elif len(parts) == 2 and parts[0] == 'machines' and self.command == 'GET': result = runner.describe(parts[1])
@@ -727,6 +928,7 @@ class Handler(BaseHTTPRequestHandler):
                     else: return self.reply(404, {'error': 'Unknown operation'})
                 else: return self.reply(404, {'error': 'Unknown operation'})
             self.reply(200, result)
+        except StorageConflict as error: self.reply(409, {'error': str(error)})
         except FileNotFoundError: self.reply(404, {'error': 'Machine or runtime artifact not found'})
         except (ValueError, KeyError, TypeError) as error: self.reply(422, {'error': str(error)})
         except Exception as error:
@@ -742,13 +944,34 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def runtime_lease(root):
+    """A restarted daemon must not overlap workers from an older supervisor."""
+    lease = (root / 'runtime.lock').open('a+b')
+    try:
+        if platform.system() == 'Windows':
+            import msvcrt
+            if lease.seek(0, 2) == 0: lease.write(b'0'); lease.flush()
+            lease.seek(0)
+            msvcrt.locking(lease.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lease
+    except OSError:
+        lease.close()
+        raise ValueError('Another native supervisor already owns this runtime state')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--port', type=int, default=19380)
     args = parser.parse_args()
     os.umask(0o077)
+    lease = runtime_lease(args.config.resolve().parent)
     runner = Runner(args.config)
+    runner.lease = lease
+    runner.recover_storage_operations()
     token_path = runner.root / 'host.token'
     if not token_path.exists():
         with token_path.open('x') as stream: stream.write(secrets.token_hex(32))
@@ -760,7 +983,10 @@ def main():
     print(f'Mola native host listening on 127.0.0.1:{args.port} ({runner.accel}/{runner.arch})', flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
-    finally: server.server_close()
+    finally:
+        server.server_close()
+        # Keep the exclusive lease until the supervisor process exits; daemon
+        # workers are terminated with it, then the OS releases the file lock.
     # Existing VMs retain their QMP sockets and disks. Restarting this service
     # reconnects to them; it never guesses ownership from an operating-system PID.
 

@@ -663,3 +663,75 @@ test('restores reapply the destination proxy binding or explicitly remove an inh
     assert.deepEqual(seeded.browser_proxy, proxy);
   }
 });
+
+test('durable storage pending response reconciles after reload and prevents overtaking generations', async t => {
+  const s = setup(t); const id = s.create.id;
+  await s.send('machines', s.create);
+  const body = { ...command(2), snapshot_id: randomUUID() };
+  let completed = false, calls = 0;
+  s.runtime.storageOperation = async (_id, verb, request) => {
+    calls++;
+    assert.deepEqual(request, body);
+    return { storage_operation: { operation_id: body.operation_id, generation: body.generation, verb,
+      status: completed ? 'completed' : 'pending', ...(completed ? { result: { id: body.snapshot_id, sha256: 'test-digest' } } : {}) } };
+  };
+  const pending = await s.send(`machines/${id}/snapshot`, body);
+  assert.equal(pending.status, 202);
+  assert.equal(pending.body.data.status, 'pending');
+  assert.equal((await s.send(`machines/${id}`, {}, 'GET')).body.data.status, 'unknown');
+  await assert.rejects(s.send(`machines/${id}/start`, command(3)), conflict);
+  await assert.rejects(s.send(`machines/${id}/snapshot`, { ...body, snapshot_id: randomUUID() }), conflict);
+  await assert.rejects(s.send(`machines/${id}/snapshot`, { ...body, operation_id: randomUUID(), generation: 3 }), conflict);
+  s.reload();
+  assert.equal((await s.send(`machines/${id}/storage-operations/snapshot/${body.operation_id}`, {}, 'GET')).status, 202);
+  completed = true;
+  const receipt = await s.send(`machines/${id}/storage-operations/snapshot/${body.operation_id}`, {}, 'GET');
+  assert.equal(receipt.status, 201);
+  assert.equal(receipt.body.data.sha256, 'test-digest');
+  assert.deepEqual(await s.send(`machines/${id}/snapshot`, body), receipt);
+  assert.equal(calls, 3);
+});
+
+test('native restore success persists before reseed, so lost reseed replies never repeat restore after reload', async t => {
+  const s = setup(t); const id = s.create.id;
+  await s.send('machines', s.create);
+  const body = { ...command(2), snapshot_id: randomUUID() };
+  let restores = 0, seeds = 0, token;
+  s.runtime.storageOperation = async (_id, verb) => {
+    assert.equal(verb, 'restore'); restores++;
+    return { storage_operation: { verb, operation_id: body.operation_id, generation: body.generation,
+      status: 'completed', result: { id, status: 'stopped' } } };
+  };
+  s.runtime.reseed = async (_id, seed) => {
+    seeds++;
+    if (!token) token = seed.registration_token;
+    assert.equal(seed.registration_token, token);
+    if (seeds === 1) throw new Error('reseed reply lost');
+  };
+  await assert.rejects(s.send(`machines/${id}/restore`, body), /reseed reply lost/);
+  s.reload();
+  assert.equal((await s.send(`machines/${id}/storage-operations/restore/${body.operation_id}`, {}, 'GET')).status, 200);
+  assert.equal(restores, 1);
+  assert.equal(seeds, 2);
+});
+
+test('terminal storage failure replays its receipt and permits later lifecycle cleanup', async t => {
+  const s = setup(t); const id = s.create.id;
+  await s.send('machines', s.create);
+  const body = { ...command(2), snapshot_id: randomUUID() };
+  let calls = 0, seededToken;
+  s.runtime.reseed = async (_id, seed) => { seededToken = seed.registration_token; };
+  s.runtime.storageOperation = async (_id, verb) => {
+    calls++;
+    return { storage_operation: { verb, operation_id: body.operation_id, generation: body.generation,
+      status: 'failed', error_status: 422, error: 'Snapshot artifact checksum mismatch' } };
+  };
+  const result = await s.send(`machines/${id}/restore`, body);
+  assert.equal(result.status, 422);
+  assert.equal(result.body.code, 'storage_operation_failed');
+  assert.equal(seededToken, s.api.registry.get(id).registration_token);
+  s.reload();
+  assert.deepEqual(await s.send(`machines/${id}/restore`, body), result);
+  assert.equal(calls, 1);
+  assert.equal((await s.send(`machines/${id}/destroy`, { ...command(3), delete_disk: false })).status, 200);
+});
