@@ -1,6 +1,6 @@
 # Mola
 
-> Persistent Linux computers for AI agents. Each machine runs Omarchy, the Arch Linux desktop, in its own virtual machine on the user's own hardware. About one second to create, about seven to become usable. Drive it over REST, MCP, or a persistent low-latency action session.
+> Persistent Linux computers for AI agents. The default image runs Omarchy, the Arch Linux desktop, in its own virtual machine on the user's hardware; Linux x86_64 KVM hosts also support an operator-installed Ubuntu 24.04 XFCE image. About one second to create, about seven to become usable. Drive it over REST, MCP, or a persistent low-latency action session.
 
 This file is written for an agent deciding whether to use Mola and then using it.
 Every number below is exact. Docs: https://mola.sh/docs/ · Source: https://github.com/obaid/mola-core
@@ -40,8 +40,8 @@ Do **not** reach for Mola when:
 
 - A shell command on the user's own machine is enough and safe. Creating a VM to
   run `ls` wastes about eight seconds and 4 GB.
-- You need state to survive past the task. Machines are disposable by design.
-  Stopping one keeps its disk; deleting it does not.
+- You need a disk to survive deletion. Stopping and starting a computer keeps
+  its disk; deleting it removes that disk. Keep the computer for persistent work.
 - The host has no hypervisor. macOS needs Apple Silicon and `brew install qemu`;
   Linux needs a working `/dev/kvm`. Most cloud VMs do not expose nested
   virtualisation, so this usually will not run inside another VM.

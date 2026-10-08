@@ -71,7 +71,7 @@
     <main class="docs-body">
 <section id="what">
     <h2>Intro</h2>
-    <p>Each machine boots Omarchy, the Arch Linux desktop, under your platform's hypervisor. You get root, systemd, pacman, Hyprland, and a browser. Install what you need. If you break the machine, delete it and create another.</p>
+    <p>The default image boots Omarchy, the Arch Linux desktop, under your platform's hypervisor. You get root, systemd, pacman, Hyprland, and a browser. Linux x86_64 KVM hosts can also install Ubuntu 24.04 with XFCE and Chrome; see the <a href="https://github.com/obaid/mola-core/blob/main/docs/ubuntu-desktops.md">Ubuntu image guide</a> for the catalog and resource defaults. Install what you need. If you break the machine, delete it and create another.</p>
     <p>The engine clones every machine from one base image using copy-on-write. A new machine therefore costs about a second and a few megabytes rather than a 16 GB copy. Machines share nothing after creation.</p>
     <p>The engine listens on loopback only. You do not create an account, and no hosted service sits in the middle. Your data stays on your computer unless you send it elsewhere.</p>
   </section>
