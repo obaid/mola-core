@@ -12,6 +12,8 @@
 - Keep uncertain disks fenced. Transform deadline expiry requires operator
   reconciliation and a supervisor restart; it is not permission to start a guest.
 - Add crash-window, retry, checksum, recreation and subprocess-lease tests.
+- Correct the declared Node requirement to 22.15+ or 24+: existing image
+  decompression uses built-in Zstd, which is unavailable on Node 20.
 
 ## 1.7.0 — 2026-10-02
 
