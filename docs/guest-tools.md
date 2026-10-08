@@ -138,8 +138,9 @@ sets the dedicated response field and dispatches input/change; arbitrary
 callback JavaScript is not accepted.
 
 `action:"type_secret"` requires `value` and exact focused `expected_app` WM_CLASS.
-Text is delivered through a private file descriptor; no clipboard, argv or
-output contains the value. Generic application focus/delivery still needs image
+Text is delivered through a Linux anonymous memory file descriptor; no clipboard,
+temporary disk file, argv or output contains the value. Hosts without this
+capability reject the request. Generic application focus/delivery still needs image
 qualification. An administrator or an agent with arbitrary evaluation/shell
 access can inspect a credential after use; the vault does not claim to prevent
 that access or remove secrets from a browser's own persistent state.

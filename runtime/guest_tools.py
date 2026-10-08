@@ -682,11 +682,15 @@ def vault(arguments):
         focused = command(['xdotool', 'getactivewindow']).strip()
         actual = command(['xprop', '-id', focused, 'WM_CLASS'])
         require(expected in re.findall(r'"([^"]+)"', actual), 'focused_app_mismatch')
-        # xdotool can read a file containing text, so secret never enters argv.
-        with tempfile.TemporaryFile() as stream:
-            stream.write(value.encode()); stream.seek(0)
-            result = subprocess.run(['xdotool', 'type', '--window', focused, '--clearmodifiers', '--file', '/proc/self/fd/' + str(stream.fileno())], pass_fds=(stream.fileno(),), capture_output=True, timeout=10)
+        # Anonymous RAM only: an unlinked /tmp file can still leave password
+        # bytes in free ext4 blocks copied by a filesystem checkpoint.
+        require(hasattr(os,'memfd_create'),'private_memory_input_unsupported',501)
+        descriptor=os.memfd_create('mola-private-input',getattr(os,'MFD_CLOEXEC',1))
+        try:
+            with os.fdopen(descriptor,'w+b',closefd=False) as stream:stream.write(value.encode());stream.flush();stream.seek(0)
+            result = subprocess.run(['xdotool', 'type', '--window', focused, '--clearmodifiers', '--file', '/proc/self/fd/' + str(descriptor)], pass_fds=(descriptor,), capture_output=True, timeout=10)
             require(result.returncode == 0, 'secret_injection_failed', 422)
+        finally:os.close(descriptor)
         return {'success': True}
     expected = web_url(arguments.get('url'), https=True)
     if action == 'captcha_inject': require(isinstance(arguments.get('tab_id'), str) and arguments['tab_id'], 'browser_tab_required')

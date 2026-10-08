@@ -100,4 +100,12 @@ with patch.object(g,'page',return_value=({}, {}, browser)):
     rejects(lambda:g.vault({'action':'browser_login','url':'https://example.com/login','password':'private'}),'vault_browser_url_mismatch')
 assert browser.calls==['location.href'], 'wrong-origin vault dispatched secret'
 assert g.dispatch({'kind':'vault-inject','action':'browser_login','url':'https://user:private@example.com','password':'private'})=={'ok':False,'status':400,'code':'invalid_browser_url'}
+descriptor=g.os.open('/dev/null',g.os.O_RDWR)
+class Typed: returncode=0
+def anonymous_type(args,**options):
+    assert 'private-memory-fixture' not in json.dumps(args)
+    assert options['pass_fds']==(descriptor,) and args[-1]=='/proc/self/fd/'+str(descriptor)
+    return Typed()
+with patch.object(g,'command',side_effect=['0x1','WM_CLASS = "owned-app", "OwnedApp"']),patch.object(g.os,'memfd_create',return_value=descriptor,create=True),patch.object(g.tempfile,'TemporaryFile',side_effect=AssertionError('secret touched disk')),patch.object(g.subprocess,'run',side_effect=anonymous_type):
+    assert g.vault({'action':'type_secret','value':'private-memory-fixture','expected_app':'OwnedApp'})=={'success':True}
 print('guest tool isolation fixtures passed')
