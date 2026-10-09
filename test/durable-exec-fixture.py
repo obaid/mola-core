@@ -84,10 +84,69 @@ class Fixture(unittest.TestCase):
     def test_running_cancel_requires_positive_scope_termination(self):
         path,record=self.record(status='running',worker_pid=42,worker_start='99')
         record['scope']='/user.slice/user-'+str(os.getuid())+'.slice/user@'+str(os.getuid())+'.service/app.slice/'+record['unit'];g.save(path,record)
-        with patch.object(g,'process_state',return_value=True),patch.object(g,'scope_gone',return_value=False),patch.object(g.subprocess,'run'):
+        with patch.object(g,'process_state',return_value=True),patch.object(g,'scope_gone',return_value=False),patch.object(g.subprocess,'run'),patch.object(g.Path,'read_text',return_value='0::'+record['scope']+'\n'):
             self.assertFalse(g.cancel(self.arguments)['terminal'])
         with patch.object(g,'scope_gone',return_value=True):
             result=g.status(self.arguments);self.assertEqual(result['status'],'failed');self.assertTrue(result['result']['cancelled'])
+    def original_scope(self,status='outcome_unknown'):
+        path,record=self.record(status=status,worker_pid=42,worker_start='99')
+        record['scope']='/user.slice/user-'+str(os.getuid())+'.slice/user@'+str(os.getuid())+'.service/app.slice/'+record['unit'];g.save(path,record)
+        return path,record
+    def test_unknown_worker_loss_cancels_only_original_unit_after_scope_empties(self):
+        path,record=self.original_scope()
+        with patch.object(g,'process_state',return_value=False),patch.object(g,'scope_gone',return_value=False),patch.object(g.subprocess,'run') as stop:
+            self.assertEqual(g.status(self.arguments)['status'],'outcome_unknown')
+            self.assertFalse(g.cancel(self.arguments)['terminal'])
+            stop.assert_called_once();self.assertEqual(stop.call_args.args[0],['/usr/bin/systemctl','--user','stop','--',record['unit']])
+        self.assertIn('cancel_requested_at',g.load(path))
+        with patch.object(g,'scope_gone',return_value=True):
+            result=g.status(self.arguments);self.assertEqual(result['status'],'failed');self.assertEqual(result['result']['exit_code'],130);self.assertTrue(result['result']['cancelled'])
+            self.assertEqual(self.accept(),result)
+        self.assertEqual(len(self.launches),1)
+    def test_unknown_empty_scope_requires_explicit_cancel_and_never_relaunches(self):
+        self.original_scope()
+        with patch.object(g,'process_state',return_value=False),patch.object(g,'scope_gone',return_value=True),patch.object(g.subprocess,'run') as stop:
+            self.assertEqual(g.status(self.arguments)['status'],'outcome_unknown')
+            self.assertEqual(g.cancel(self.arguments)['result']['exit_code'],130);stop.assert_not_called()
+        self.assertEqual(len(self.launches),1)
+    def test_lost_cancel_reply_is_reconciled_from_persisted_cancel_intent(self):
+        path,record=self.original_scope()
+        with patch.object(g,'process_state',return_value=False),patch.object(g,'scope_gone',return_value=False),patch.object(g.subprocess,'run',side_effect=g.subprocess.TimeoutExpired('systemctl',10)) as stop:
+            self.assertEqual(g.cancel(self.arguments)['status'],'outcome_unknown');stop.assert_called_once()
+        self.assertIn('cancel_requested_at',g.load(path))
+        with patch.object(g,'scope_gone',return_value=True),patch.object(g.subprocess,'run') as stop:
+            result=g.status(self.arguments);self.assertEqual(result['result']['exit_code'],130);stop.assert_not_called()
+            self.assertEqual(self.accept(),result)
+    def test_unknown_cancel_refuses_missing_malformed_scope_or_worker_identity(self):
+        for fields in [{'scope':None},{'scope':'/system.slice/customer.service'},{'unit':'other.service'},{'worker_pid':0},{'worker_pid':True},{'worker_start':None},{'worker_start':'bad'}]:
+            with self.subTest(fields=fields):
+                path,record=self.original_scope();record.update(fields);g.save(path,record)
+                with patch.object(g.subprocess,'run') as stop:
+                    result=g.cancel(self.arguments);self.assertEqual(result['status'],'outcome_unknown');stop.assert_not_called()
+                self.assertIn('cancel_requested_at',g.load(path))
+    def test_unknown_cancel_refuses_new_boot_unreadable_worker_or_wrong_live_cgroup(self):
+        path,record=self.original_scope()
+        for boot,state,group in [('later-boot',False,record['scope']),(BOOT,None,record['scope']),(BOOT,True,'/other/scope')]:
+            g.save(path,record)
+            with patch.object(g,'boot_id',return_value=boot),patch.object(g,'process_state',return_value=state),patch.object(g.Path,'read_text',return_value='0::'+group+'\n'),patch.object(g.subprocess,'run') as stop:
+                self.assertEqual(g.cancel(self.arguments)['status'],'outcome_unknown');stop.assert_not_called()
+                self.assertIn('cancel_requested_at',g.load(path))
+    def test_cancel_recovery_reads_real_owned_cgroup_fixture_and_requires_empty(self):
+        path,record=self.original_scope();record['cancel_requested_at']=time.time();g.save(path,record)
+        scope=self.home/'owned-cgroup';scope.mkdir();events=scope/'cgroup.events';events.write_text('populated 1\nfrozen 0\n')
+        real_path=g.scope_path
+        def validated_scope(value):
+            real_path(value)
+            return scope
+        with patch.object(g,'scope_path',side_effect=validated_scope),patch.object(g,'process_state',return_value=False):
+            self.assertEqual(g.status(self.arguments)['status'],'outcome_unknown')
+            events.write_text('populated 0\nfrozen 0\n')
+            result=g.status(self.arguments);self.assertEqual(result['result']['exit_code'],130)
+        self.assertEqual(self.accept(),result);self.assertEqual(len(self.launches),1)
+    def test_positive_terminal_receipt_is_preserved_on_late_cancel(self):
+        self.record(status='completed',result={'exit_code':0,'stdout':'completed-before-cancel','stderr':''})
+        with patch.object(g.subprocess,'run') as stop:
+            result=g.cancel(self.arguments);self.assertEqual(result['status'],'completed');self.assertEqual(result['result']['stdout'],'completed-before-cancel');stop.assert_not_called()
     def test_worker_persists_launch_fence_and_finishing_but_not_false_terminal(self):
         self.accept();record=g.load(g.path_for(OP));unit=record['unit'];original=g.Path.read_text
         def proc(path,*args,**kwargs):

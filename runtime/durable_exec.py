@@ -127,6 +127,8 @@ def scope_path(record):
     value=record.get('scope')
     require(isinstance(record.get('attempt'),str) and re.fullmatch(r'[a-f0-9]{32}',record['attempt'])
             and record.get('unit')=='mola-exec-'+record['attempt']+'.service'
+            and type(record.get('worker_pid')) is int and record['worker_pid']>1
+            and isinstance(record.get('worker_start'),str) and re.fullmatch(r'[1-9][0-9]{0,19}',record['worker_start'])
             and isinstance(value,str) and value.startswith('/user.slice/user-'+str(os.getuid())+'.slice/user@'+str(os.getuid())+'.service/') and value.endswith('/'+record['unit'])
             and not any(v in ['.','..'] for v in value.split('/')),'exec_scope_unknown',501)
     return Path('/sys/fs/cgroup')/value.lstrip('/')
@@ -158,7 +160,7 @@ def reconcile(path,record):
     if record['status']=='finishing' and scope_gone(record):
         record['status']='completed' if record['result']['exit_code']==0 else 'failed'
         record['finished_at']=time.time();save(path,record)
-    elif record.get('cancel_requested_at') is not None and record['status']=='running' and scope_gone(record):
+    elif record.get('cancel_requested_at') is not None and record['status'] in ['running','outcome_unknown'] and scope_gone(record):
         record.update(status='failed',finished_at=time.time(),result={'exit_code':130,'stdout':'','stderr':'','cancelled':True});save(path,record)
     elif record['guest_boot_id']!=boot_id() or record['status']=='queued' and time.time()-record['accepted_at']>15 or record['status']=='running' and process_state(record.get('worker_pid',0),record.get('worker_start','')) is False:
         record['status']='outcome_unknown';save(path,record)
@@ -202,16 +204,27 @@ def cancel(arguments):
     identifier,_,_=operation(arguments);path=path_for(identifier)
     with Lock(path):
         record=load(path);require(record is not None,'exec_operation_not_found',404);same_binding(record,arguments)
-        record=reconcile(path,record)
         if record['status'] in TERMINAL:return public(record)
-        if record['guest_boot_id']!=boot_id() or record['status']=='outcome_unknown':return public({**record,'status':'outcome_unknown'})
-        record['cancel_requested_at']=time.time()
-        if record['status']=='queued':
-            # The same receipt lock guards the worker's launch fence. A late
-            # supervisor can start, but can never launch this command now.
-            record.update(status='failed',finished_at=time.time(),result={'exit_code':130,'stdout':'','stderr':'','cancelled':True});save(path,record)
-            return public(record)
-        scope_path(record);save(path,record);unit=record['unit']
+        # This permanent launch fence is durable even if process/cgroup reads
+        # or the stop acknowledgement are unavailable. Never submit again.
+        record.setdefault('cancel_requested_at',time.time());save(path,record)
+        try:
+            record=reconcile(path,record)
+            if record['status'] in TERMINAL:return public(record)
+            require(record['guest_boot_id']==boot_id(),'exec_scope_unknown',501)
+            if record['status']=='queued':
+                # The worker's launch fence holds this same receipt lock.
+                record.update(status='failed',finished_at=time.time(),result={'exit_code':130,'stdout':'','stderr':'','cancelled':True});save(path,record)
+                return public(record)
+            scope_path(record)
+            state=process_state(record['worker_pid'],record['worker_start'])
+            require(state is not None,'exec_scope_unknown',501)
+            if state:
+                groups=(Path('/proc')/str(record['worker_pid'])/'cgroup').read_text().splitlines()
+                require([value[3:] for value in groups if value.startswith('0::')]==[record['scope']],'exec_scope_unknown',501)
+            unit=record['unit']
+        except (OSError,ValueError,KeyError,ExecError):
+            record['status']='outcome_unknown';save(path,record);return public(record)
     try:subprocess.run(['/usr/bin/systemctl','--user','stop','--',unit],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10,env=manager_environment())
     except (OSError,subprocess.SubprocessError):pass
     return status(arguments)

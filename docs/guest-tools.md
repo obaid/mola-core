@@ -244,6 +244,12 @@ original scope prove termination. A disappeared worker, missing receipt,
 reboot or unavailable scope stays unknown; elapsed time does not authorize a
 new execution. Queued cancellation permanently fences command launch; running
 cancellation remains nonterminal until original scope termination is proved.
+An explicit cancellation can also recover a same-boot `outcome_unknown` receipt
+when its persisted attempt, unit, scope and worker identity are valid: only that
+original unit is stopped, and `failed` with exit 130/`cancelled:true` is published
+after the scope is positively empty. Missing scope data, stale boots and
+uncertain process/cgroup observations remain unknown. Ordinary status without
+cancellation never resolves worker disappearance or launches a replacement.
 Ordinary background descendants are terminated when the managed command
 finishes; use application tools for persistent app lifecycles. Known no-launch
 refusals and fenced queued cancellation can return terminal failure without
@@ -311,7 +317,12 @@ A separate frozen-source canary completed a 125-second durable exec with a
 900-second deadline after a lost submission reply, with exactly one execution,
 typed payload/run identity and redacted stdout/stderr. Changed payloads were
 refused. Worker loss remained nonterminal and did not replay; timeout and
-cancellation became terminal only after the original scopes were empty.
+cancellation became terminal only after the original scopes were empty. A
+supplemental canary on the final cancellation runtime repeated this proof in
+125.952 seconds, then killed the worker while an ordinary TERM-ignoring child
+remained alive. Explicit cancellation recovered the original unknown operation
+with exit 130 only after its scope emptied; a stale-generation request was
+refused and the command counter remained one.
 
 ### Private independent egress checker
 
