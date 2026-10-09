@@ -13,6 +13,56 @@ import select
 import socket
 import socketserver
 import threading
+import secrets
+import time
+
+
+class Meter:
+    """Observed proxy wire bytes; never credentials, URLs, or billing truth."""
+    def __init__(self, folder, boot_id=None):
+        self.folder = Path(folder)
+        if self.folder.is_symlink(): raise ValueError('Unsafe proxy meter directory')
+        self.folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.path = self.folder / 'counters.json'
+        if self.path.is_symlink(): raise ValueError('Unsafe proxy meter file')
+        self.guard = threading.Lock()
+        self.unflushed, self.last_flush = 0, time.monotonic()
+        boot_id = boot_id or Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        self.state = json.loads(self.path.read_text()) if self.path.exists() else {'bytes_up': 0, 'bytes_down': 0, 'connections': 0}
+        if self.state.get('boot_id') != boot_id:
+            self.state.update(boot_id=boot_id, counter_epoch=secrets.token_hex(16))
+        self.add()
+
+    def add(self, defer=False, **increments):
+        with self.guard:
+            for key,value in increments.items():
+                if key not in ('bytes_up', 'bytes_down', 'connections') or type(value) is not int or value < 0: raise ValueError('Invalid proxy counter')
+                self.state[key] += value
+                self.unflushed += value
+            if defer and self.unflushed < 65536 and time.monotonic() - self.last_flush < 1: return
+            temporary = self.path.with_suffix('.new')
+            with temporary.open('w') as stream:
+                json.dump(self.state, stream); stream.flush(); os.fsync(stream.fileno())
+            temporary.chmod(0o600); temporary.replace(self.path)
+            descriptor = os.open(self.folder, os.O_RDONLY)
+            try: os.fsync(descriptor)
+            finally: os.close(descriptor)
+            self.unflushed, self.last_flush = 0, time.monotonic()
+
+
+class CountingSocket:
+    def __init__(self, stream, meter): self.stream, self.meter = stream, meter
+    def fileno(self): return self.stream.fileno()
+    def settimeout(self, timeout): return self.stream.settimeout(timeout)
+    def sendall(self, data):
+        self.stream.sendall(data); self.meter.add(defer=True, bytes_up=len(data))
+    def recv(self, size):
+        data = self.stream.recv(size)
+        if data: self.meter.add(defer=True, bytes_down=len(data))
+        return data
+    def close(self):
+        try: self.meter.add()
+        finally: self.stream.close()
 
 HOST = re.compile(r'^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+decodo\.com$')
 
@@ -129,6 +179,9 @@ class Handler(socketserver.BaseRequestHandler):
                 if key.lower() not in ['proxy-authorization', 'proxy-connection', 'connection', 'expect']:
                     fields.append((key, value.strip()))
             upstream = self.server.connector(self.server.config)
+            if self.server.meter:
+                self.server.meter.add(connections=1)
+                upstream = CountingSocket(upstream, self.server.meter)
             credential = base64.b64encode((self.server.config['username'] + ':' + self.server.config['password']).encode()).decode()
             fields += [('Proxy-Authorization', 'Basic ' + credential)]
             if method != 'CONNECT': fields.append(('Connection', 'close'))
@@ -162,9 +215,10 @@ class Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-    def __init__(self, address, config, connector=connect):
+    def __init__(self, address, config, connector=connect, meter=None):
         self.config = validate(config)
         self.connector = connector
+        self.meter = meter
         self.slots = threading.BoundedSemaphore(128)
         super().__init__(address, Handler)
 
@@ -191,7 +245,15 @@ class Server(socketserver.ThreadingTCPServer):
 
 if __name__ == '__main__':
     config = validate(json.loads(Path('/etc/mola/browser-proxy.json').read_text()))
-    server = Server(('127.0.0.1', 18888), config)
+    meter_folder = Path('/var/lib/mola/browser-proxy')
+    if meter_folder.is_symlink(): raise ValueError('Unsafe proxy meter directory')
+    meter_folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.geteuid() == 0:
+        os.chown(meter_folder, 65534, 65534)
+        for path in meter_folder.iterdir():
+            if path.is_symlink(): raise ValueError('Unsafe proxy meter file')
+            if path.is_file(): os.chown(path, 65534, 65534)
+    server = Server(('127.0.0.1', 18888), config, meter=Meter(meter_folder))
     if os.geteuid() == 0:
         os.setgroups([])
         os.setgid(65534)

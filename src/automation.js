@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { runtimeScript, statePath } from './paths.js';
 import { pythonBin } from './python.js';
+import { serializedComputerTool } from './tool-locks.js';
 
 const DEFAULT_TIMEOUT = 180_000;
 const DEFAULT_QUEUE = 64;
@@ -143,7 +144,7 @@ export class AutomationPool {
 let pool;
 export function runAction(target, action, timeoutMs = DEFAULT_TIMEOUT) {
   pool ??= new AutomationPool();
-  return pool.run(target, action, timeoutMs);
+  return serializedComputerTool(target.id, () => pool.run(target, action, timeoutMs));
 }
 
 export function closeAutomation() {

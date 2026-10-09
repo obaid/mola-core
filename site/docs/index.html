@@ -60,6 +60,7 @@
           </ol>
         </li>
         <li><a href="#storage">Hosted storage</a></li>
+        <li><a href="#guest-tools">Hosted browser &amp; apps</a></li>
         <li><a href="#mcp">MCP</a></li>
         <li><a href="#cua">Cua Driver</a></li>
         <li><a href="#api">API reference</a></li>
@@ -133,9 +134,11 @@ curl -s -X POST $API/machines \
   </section>
 <section id="storage">
     <h2>Hosted storage and recovery</h2>
-    <p>Mola Core 1.8.0 gives an authenticated control plane durable storage receipts. Snapshot, restore, import, seal, delete and fence operations keep their operation ID and generation across lost responses and restarts. Long operations return HTTP 202 while pending; clients reconcile the same receipt before sending another mutation.</p>
+    <p>Mola Core 1.9.0 gives an authenticated control plane durable storage receipts. Snapshot, restore, import, seal, delete and fence operations keep their operation ID and generation across lost responses and restarts. Long operations return HTTP 202 while pending; clients reconcile the same receipt before sending another mutation.</p>
     <p>Restore verifies checksums and prepares a temporary disk before atomic replacement. Pending work keeps the disk fenced. A timeout does not prove the guest is stopped or make its capacity available.</p>
-    <p>These are private host APIs for operators. See the <a href="https://github.com/obaid/mola-core/blob/main/docs/host-storage.md">host storage contract</a> and <a href="https://github.com/obaid/mola-core/blob/main/docs/guest-agent-image-update.md">guest-agent update requirements</a>. The live recovery canary covers a 20 GB Ubuntu disk; broader image and disk-size qualification remains separate work.</p>
+    <p>Stopped resize preserves the persistent disk and grows its ext4 filesystem. Restoring an older, smaller snapshot retains the computer's larger allocation: Mola verifies and grows unpublished restore staging before replacing the disk. Disks cannot shrink.</p>
+    <p>Running-disk checkpoints require a qualified image and explicit host and control-plane enablement. They quiesce disk writes and retain durable operation receipts; they do not capture process memory. Check capabilities before requesting a checkpoint.</p>
+    <p>These are private host APIs for operators. See the <a href="https://github.com/obaid/mola-core/blob/main/docs/host-storage.md">host storage contract</a> and <a href="https://github.com/obaid/mola-core/blob/main/docs/guest-agent-image-update.md">guest-agent update requirements</a>. Live native Ubuntu restore and disk-growth tests cover 20 GB, 40 GB and 80 GB disks, including an older snapshot restored onto a larger allocation. Off-host archive and broader image qualification have separate acceptance gates.</p>
     <p>For hosted computers, customer metadata, fixed expiry, restricted agent credentials and browser-approved MCP connections, use the <a href="https://cloud.mola.sh/docs">Mola Cloud docs</a>.</p>
   </section>
 <section id="build">
@@ -306,6 +309,16 @@ cua-driver status
 ls ~/.agents/skills/cua-driver</code></pre>
     <p>Availability follows the guest image. Updating the <code>mola-core</code> npm package alone does not replace an existing self-hosted computer's disk. Mola Cloud installs Cua on older retained Omarchy disks when they next become ready and exposes authenticated sessions through its <a href="https://cloud.mola.sh/docs/cua">Cua API and agent tools</a>.</p>
     <p>The current image leaves the experimental Hyprland input plugin disabled. Desktop-scoped input works when the tool arguments include <code>scope: "desktop"</code>; window-scoped input may return <code>isError</code>. Inspect each result and take a fresh desktop state after input. Read the <a href="https://github.com/obaid/mola-core/blob/main/docs/cua.md">full Cua guide</a> for image and skill details.</p>
+  </section>
+<section id="guest-tools">
+    <h2>Hosted browser &amp; application tools</h2>
+    <p>The Linux host API adds managed browser automation, typed installers, session manifests, display geometry and scoped capture for Mola Cloud. Cloud-managed computers use the private host token and current computer generation under <code>/internal/v1/machines/{id}</code>. Locally managed computers expose the equivalent typed routes under <code>/v1/machines/{id}</code> with operator authentication. Keep the host listener on loopback behind the authenticated control plane.</p>
+    <p>Managed Chrome supports tab inspection, snapshots with expiring element references, navigation, fill, click, keyboard, evaluation and screenshots. Query browser capabilities before selecting a mode. Preparing the browser requires stopping unmanaged Chrome first; profile migration happens offline and preserves its source copy.</p>
+    <p>Typed installers support apt, pacman, checksum-verified deb and portable artifacts, Flathub packages and bounded scripts. Supply a stable operation identity before submission and poll its durable receipt. A queued receipt is not success. An uncertain worker outcome does not replay automatically.</p>
+    <p>Private durable exec jobs support 1–900 second deadlines through <code>POST /internal/v1/machines/{id}/job-exec</code>. Commands, JSON payloads and redaction values travel through anonymous memory and stdin. Poll <code>/job-exec/status</code> using the original operation, generation and boot identity. <code>/job-exec/cancel</code> requests cancellation of that scope; only confirmed termination releases its reservation. Lost replies never cause command replay. Legacy synchronous actions and pool exec setup retain their 120-second limit.</p>
+    <p>Capture chooses a desktop, exact window or browser tab and crops source pixels before returning them. Unsupported targets fail closed. Display geometry is confirmed against the guest display before it is saved. A changed runtime generation rejects stale capture and input.</p>
+    <p>Cloud vault injection uses a private guest channel and returns sanitized success only. It checks the saved exact HTTPS login URL or expected focused app. Vault storage, expiring viewer grants, schedules, pools, payment accounting and commercial provider credentials belong to the cloud control plane.</p>
+    <p>Read the <a href="https://github.com/obaid/mola-core/blob/main/docs/guest-tools.md">guest-tools contract</a> for operation fields and image capabilities, and the <a href="https://cloud.mola.sh/docs/browser-tools">cloud browser guide</a>, <a href="https://cloud.mola.sh/docs/vault">vault guide</a>, <a href="https://cloud.mola.sh/docs/live-view">live-view guide</a> and <a href="https://cloud.mola.sh/docs/jobs">jobs guide</a> for customer APIs. Paid providers expose deployment availability and require separate qualification.</p>
   </section>
 <section id="api">
     <h2>API reference</h2>

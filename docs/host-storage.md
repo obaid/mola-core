@@ -50,6 +50,17 @@ current disk in place. Restore rotates the
 agent registration credential and reseeds host-specific identity before the
 next boot. It does not start the machine.
 
+Restoring an older, smaller snapshot keeps the computer's current disk allocation.
+After validating the original archive and raw-disk checksums, Core expands only
+the unpublished restored copy, repairs/replays its ext4 journal, runs `resize2fs`,
+and requires a strict `e2fsck -fn` result of zero before publication. For example,
+a 40 GB snapshot restored into an upgraded 80 GB computer keeps an 80 GB disk and
+filesystem while restoring the snapshot's files. The source archive and previous
+disk remain untouched; a failed grow keeps the previous disk. Prepared receipts
+bind the expanded size and checksum, so a lost response reconciles without
+repeating the restore. A legacy smaller prepared stage cannot replace the larger
+allocation.
+
 Lifecycle and disk operations persist intent before runtime work. Repeating
 an operation ID with exactly the same payload returns its saved result. Changing
 that payload is rejected. An uncertain operation must be retried with the same

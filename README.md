@@ -165,6 +165,7 @@ in this repository:
 - [Development](docs/development.md), working on the engine itself
 - [Action sessions](docs/action-session.md), persistent actions, screen frames and tunnels
 - [Cua Driver](docs/cua.md), native computer-use tools in supported Omarchy images
+- [Browser, apps and sessions](docs/guest-tools.md), typed guest tools, private injection and scoped capture
 - [Performance](docs/performance.md), repeatable transport benchmarks
 
 ## What is in this repository

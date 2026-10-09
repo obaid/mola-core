@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.0 — 2026-10-08
+
+- Add private durable exec jobs with caller-stable receipts and 1–900 second
+  deadlines. Commands/payloads use stdin and memfd; only redacted bounded output
+  is retained. Original scope termination is required before terminal release;
+  missing workers or receipts stay unknown and never replay automatically.
+- Add authenticated guest browser/app/session tools with persistent Chrome
+  profiles, full/headless modes, bounded CDP snapshot references and periodic
+  restore-first session saves.
+- Add private URL-bound password/TOTP and focused-app secret injection, source
+  window/tab cropping and scoped viewer input. Secrets use SSH stdin.
+- Add durable typed installers, portable version activation/pins/rollback,
+  display geometry and stopped disk/resource growth with replayable receipts.
+- Preserve larger disk allocations when restoring an older smaller snapshot,
+  verifying unpublished ext4 growth before committing the restored disk.
+- Add qualified running filesystem checkpoints with independent resume/thaw
+  watchdogs and durable uncertainty fences. No process-memory capture is claimed.
+- Extend managed proxy scope/counters and remove inherited credentials from
+  clone staging. Paid services and TLS unlock require separate qualification.
+- Add an operator-only proxy egress checker with normal TLS validation, a pinned
+  certificate and fresh configuration/boot proofs; commercial geography remains
+  disabled until separately qualified.
+- Document host/local route boundaries and measured browser-mode limitations.
+
 ## 1.8.0 — 2026-10-08
 
 - Run private host storage commands with durable, generation-bound receipts.

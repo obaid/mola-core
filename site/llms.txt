@@ -204,11 +204,15 @@ client; or Linux x86_64 with `qemu-system-x86_64` and a usable `/dev/kvm`.
 
 ## Hosted storage and cloud agents
 
-Mola Core 1.8.0 uses durable operation/generation-bound receipts for private
+Mola Core 1.9.0 uses durable operation/generation-bound receipts for private
 host storage. A pending snapshot or restore returns HTTP 202; reconcile the
 same receipt and retain disk ownership until a terminal result. Restore stages
 and verifies the disk before atomic replacement. See the
 [host storage contract](https://github.com/obaid/mola-core/blob/main/docs/host-storage.md).
+Stopped resize grows ext4 without shrinking disks. Restoring a smaller snapshot
+retains the larger disk allocation by growing verified unpublished staging.
+Running-disk checkpoints require qualified image capabilities and explicit
+host/control-plane enablement; they do not capture process memory.
 These APIs require a separate operator credential. Hosted customer metadata,
 fixed expiry, computer-scoped MCP grants and OAuth are documented at
 [Mola Cloud](https://cloud.mola.sh/docs/mcp).
@@ -225,3 +229,20 @@ fixed expiry, computer-scoped MCP grants and OAuth are documented at
 
 Licence: FSL-1.1-ALv2. Use it for anything except building something that
 competes with Mola. Each release becomes Apache 2.0 two years after it ships.
+
+## Hosted guest tools and cloud workflows
+
+The private Linux host API provides managed browser, typed installer, session manifest, display geometry, scoped capture and private secret injection tools. These are cloud host routes with runtime-generation fencing, not the local desktop API above. Contract: https://github.com/obaid/mola-core/blob/main/docs/guest-tools.md
+
+Cloud guides: https://cloud.mola.sh/docs/browser-tools · https://cloud.mola.sh/docs/vault · https://cloud.mola.sh/docs/live-view · https://cloud.mola.sh/docs/jobs · https://cloud.mola.sh/docs/pools · https://cloud.mola.sh/docs/prepaid · https://cloud.mola.sh/docs/networking
+
+Query capabilities and provider availability. Do not treat a queued installer receipt as success, retry unknown side effects automatically, expose vault secrets or put viewer tokens in URLs.
+
+Private durable exec: POST /internal/v1/machines/{id}/job-exec accepts 1–900 second
+deadlines. Commands, JSON payloads and redaction values use anonymous memory/stdin.
+Poll /job-exec/status with the original operation_id, expected_generation and
+expected_boot_id. Request /job-exec/cancel for the same identity. Reservations stay
+held until positive scope termination; lost responses never replay commands.
+Legacy synchronous actions and pool exec setup retain their 120-second limit.
+Customer schedules, triggers and cancellation are documented in the cloud jobs
+guide and exposed through mola-cloud SDK/CLI and MCP.

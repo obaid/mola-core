@@ -21,6 +21,18 @@ REMOVE = [
     '/var/lib/mola/computer-id', '/var/lib/mola/enrollment-key',
     '/var/lib/hyperwake/machine-token', '/var/lib/hyperwake/machine-id',
     '/var/lib/hyperwake/computer-id', '/var/lib/hyperwake/enrollment-key',
+    # Per-computer managed egress identity must never become a fork's identity.
+    # Owner snapshots preserve their guest disk bytes; only the unpublished
+    # clone staging disk is stripped, before destination enrollment/reseed.
+    '/etc/mola/browser-proxy.json', '/etc/mola/browser-proxy.json.new',
+    '/etc/mola/browser-proxy-binding.json', '/etc/mola/browser-proxy-binding.json.new',
+    '/etc/opt/chrome/policies/managed/mola-browser-proxy.json',
+    '/etc/opt/chrome/policies/managed/mola-browser-proxy.json.new',
+    '/etc/systemd/system/mola-browser-proxy.service',
+    '/etc/systemd/system/mola-browser-proxy.service.new',
+    '/etc/systemd/system/multi-user.target.wants/mola-browser-proxy.service',
+    '/usr/local/bin/mola-browser-proxy', '/usr/local/bin/mola-browser-proxy.new',
+    '/var/lib/mola/browser-proxy/counters.json', '/var/lib/mola/browser-proxy/counters.new',
 ]
 
 

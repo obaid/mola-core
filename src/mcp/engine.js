@@ -89,6 +89,7 @@ export function createEngine({
     stopMachine: (id, force) => call('POST', `/v1/machines/${encodeURIComponent(id)}/stop`, force ? { force: true } : undefined),
     deleteMachine: (id) => call('DELETE', `/v1/machines/${encodeURIComponent(id)}`),
     desktop: (id) => call('POST', `/v1/machines/${encodeURIComponent(id)}/desktop`),
+    computerTool: (id, endpoint, tool, args) => call('POST', `/v1/machines/${encodeURIComponent(id)}/${endpoint}`, { tool, arguments: args }),
 
     act: (id, action, { timeoutMs } = {}) =>
       call('POST', `/v1/machines/${encodeURIComponent(id)}/actions`, action, { timeoutMs }),

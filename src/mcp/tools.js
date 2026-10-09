@@ -36,6 +36,18 @@ export function buildTools(engine) {
     machine_id: { type: 'string', description: 'The id returned by create_machine.' },
   };
 
+  for (const [endpoint, names] of Object.entries({
+    browser: ['browser_prepare', 'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_fill', 'browser_key', 'browser_evaluate', 'browser_screenshot', 'browser_tabs', 'browser_capabilities'],
+    apps: ['app_install', 'app_status', 'app_launch', 'app_list'],
+    'session-manifest': ['session_save', 'session_restore', 'session_state', 'session_autosave'],
+    'computer-tools': ['software_state', 'software_pin', 'software_stage', 'software_activate', 'software_rollback'],
+  })) {
+    for (const name of names) define({ name, title: name.replaceAll('_', ' '),
+      description: `Run the ${name} typed guest tool on a ready owned computer. Missing or unqualified capabilities fail explicitly. Install operations require an operation_id and return bounded progress; poll app_status.`,
+      inputSchema: { type: 'object', properties: { ...machineArg, arguments: { type: 'object', description: 'Typed arguments documented in docs/guest-tools.md.' } }, required: ['machine_id'], additionalProperties: false },
+    }, async args => json(await engine.computerTool(args.machine_id, endpoint, name, args.arguments || {})));
+  }
+
   // ---- lifecycle -----------------------------------------------------------
 
   define({

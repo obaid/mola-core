@@ -27,7 +27,7 @@ function freePort() {
  * novelty.
  */
 export class Runtime {
-  constructor(host, { port = null } = {}) {
+  constructor(host, { port = null, spawnImpl = spawn, restartDelayMs = 1000 } = {}) {
     this.host = host;
     // Chosen at start time. A fixed port collides with anything else on this
     // machine that speaks the same protocol, which is exactly what happened
@@ -36,6 +36,12 @@ export class Runtime {
     this.base = null;
     this.child = null;
     this.token = null;
+    this.spawn = spawnImpl;
+    this.restartDelayMs = restartDelayMs;
+    this.restartBackoff = restartDelayMs;
+    this.restartTimer = null;
+    this.supervising = false;
+    this.stopping = false;
   }
 
   #writeConfig() {
@@ -70,6 +76,10 @@ export class Runtime {
       guest_agent_refresh: (process.env.MOLA_GUEST_AGENT_REFRESH ?? process.env.MOLA_HOST_API) === '1',
       max_running: Number(process.env.MOLA_MAX_RUNNING || 2),
       max_memory_mb: Number(process.env.MOLA_MAX_MEMORY_MB || 8192),
+      guest_key: statePath('keys', 'guest'),
+      guest_known_hosts: statePath('keys', 'known_hosts'),
+      running_checkpoint: process.env.MOLA_RUNNING_CHECKPOINT === '1',
+      checkpoint_lease_seconds: Number(process.env.MOLA_CHECKPOINT_LEASE_SECONDS || 120),
     };
     const path = join(root, 'config.json');
     writeFileSync(path, JSON.stringify(config, null, 2), { mode: 0o600 });
@@ -77,14 +87,12 @@ export class Runtime {
   }
 
   async start() {
+    this.stopping = false;
     this.port ??= await freePort();
     this.base = `http://127.0.0.1:${this.port}`;
     const config = this.#writeConfig();
-    this.child = spawn('python3', [runtimeScript('native/host.py'), '--config', config, '--port', String(this.port)], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
-    });
-    this.child.stderr.on('data', (chunk) => process.stderr.write(`[runtime] ${chunk}`));
+    this.configPath = config;
+    this.#spawnNative();
 
     // The runtime mints its own bearer token on first start and refuses every
     // request without it, health included.
@@ -97,11 +105,34 @@ export class Runtime {
     if (!this.token) throw new Error('Runtime never wrote its token.');
 
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (await this.healthy()) return;
+      if (await this.healthy()) { this.supervising = true; return; }
       if (this.child.exitCode !== null) throw new Error(`Runtime exited with code ${this.child.exitCode}`);
       await delay(100);
     }
     throw new Error('Runtime did not become healthy.');
+  }
+
+  #spawnNative() {
+    const startedAt = Date.now();
+    const child = this.child = this.spawn('python3', [runtimeScript('native/host.py'), '--config', this.configPath, '--port', String(this.port)], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+    });
+    child.stderr.on('data', (chunk) => process.stderr.write(`[runtime] ${chunk}`));
+    const retry = () => {
+      if (!this.supervising || this.stopping || this.child !== child || this.restartTimer) return;
+      const pause = Date.now() - startedAt >= 10_000 ? this.restartDelayMs : this.restartBackoff;
+      this.restartBackoff = Math.min(pause * 2, 30_000);
+      this.restartTimer = setTimeout(() => {
+        this.restartTimer = null;
+        if (this.stopping) return;
+        // Same config, port and persisted token. Native exclusive leases and
+        // incarnation receipts fence surviving writers and reconnect QEMU.
+        this.#spawnNative();
+      }, pause);
+    };
+    child.on('exit', retry);
+    child.on('error', retry);
   }
 
   async healthy() {
@@ -150,6 +181,7 @@ export class Runtime {
     return this.#call('GET', `/machines/${id}/storage-operations/${verb}/${operationId}`, undefined, 10_000);
   }
   snapshotManifest(id, snapshotId) { return this.#call('GET', `/machines/${id}/snapshots/${snapshotId}`); }
+  capabilities() { return this.#call('GET', '/capabilities', undefined, 10_000); }
   reseed(id, body) { return this.#call('POST', `/machines/${id}/reseed`, body); }
 
   create(spec) { return this.#call('POST', '/machines', spec); }
@@ -184,6 +216,10 @@ export class Runtime {
   }
 
   stop() {
+    this.stopping = true;
+    this.supervising = false;
+    clearTimeout(this.restartTimer);
+    this.restartTimer = null;
     this.child?.kill('SIGTERM');
   }
 

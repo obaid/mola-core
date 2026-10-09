@@ -25,9 +25,18 @@ if a=='exec':
                 os.environ['DBUS_SESSION_BUS_ADDRESS']='unix:path='+str(runtime/'bus')
             break
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-        child=subprocess.Popen(['/bin/bash','-lc',p['command']],stdout=out,stderr=err,start_new_session=True,cwd=os.path.expanduser('~'))
+        payload=json.dumps(p['payload'],separators=(',',':')).encode() if 'payload' in p else None
+        if payload is not None and len(payload)>limit: raise ValueError('Job payload exceeds 1 MiB')
+        child_env=dict(os.environ)
+        if 'job_run_id' in p:
+            identity=p['job_run_id']
+            if not isinstance(identity,str) or not 1<=len(identity)<=128 or any(not (c.isascii() and (c.isalnum() or c in '_-')) for c in identity): raise ValueError('Invalid job run identity')
+            child_env['MOLA_JOB_RUN_ID']=identity
+        child=subprocess.Popen(['/bin/bash','-lc',p['command']],stdin=subprocess.PIPE if payload is not None else subprocess.DEVNULL,stdout=out,stderr=err,env=child_env,start_new_session=True,cwd=os.path.expanduser('~'))
         timed_out=False
-        try: child.wait(timeout=p.get('timeout',30))
+        try:
+            if payload is not None: child.communicate(input=payload,timeout=p.get('timeout',30))
+            else: child.wait(timeout=p.get('timeout',30))
         except subprocess.TimeoutExpired:
             timed_out=True
             os.killpg(child.pid,signal.SIGKILL)
@@ -75,7 +84,12 @@ class Worker:
         control.mkdir(parents=True, exist_ok=True, mode=0o700)
         digest = hashlib.sha256((target['id'] + ':' + target['session_key']).encode()).hexdigest()[:32]
         socket = control / ('ssh-' + digest)
-        reused = socket.exists()
+        # OpenSSH appends a random temporary suffix while publishing a master
+        # socket. Long custom MOLA_HOME paths must still execute successfully.
+        # Fall back to ordinary SSH rather than creating an oversized AF_UNIX
+        # address or a control socket outside this operator's state namespace.
+        multiplex = len(os.fsencode(str(socket))) + 18 < 104
+        reused = multiplex and socket.exists()
         encoded = base64.b64encode(GUEST_PROGRAM.encode()).decode()
         remote = "python3 -c \"import base64; exec(base64.b64decode('" + encoded + "'))\""
         # The host alias remains stable for the computer, preserving the
@@ -83,8 +97,8 @@ class Worker:
         alias = 'mola-' + target['id']
         args = ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes',
                 '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=accept-new',
-                '-o', 'ControlMaster=auto', '-o', 'ControlPersist=60',
-                '-o', 'ControlPath=' + str(socket), '-o', 'HostKeyAlias=' + alias,
+                '-o', 'ControlMaster=' + ('auto' if multiplex else 'no'),
+                *(['-o', 'ControlPersist=60', '-o', 'ControlPath=' + str(socket)] if multiplex else []), '-o', 'HostKeyAlias=' + alias,
                 '-o', 'UserKnownHostsFile=' + target['known_hosts'],
                 '-i', target['ssh_key'], '-p', str(port), 'dev@' + host, remote]
         try:
