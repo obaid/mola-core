@@ -48,3 +48,20 @@ test('guest tool validation and durable installer/software/session failure fixtu
   assert.equal(result.status, 0, result.stderr + result.stdout);
   assert.match(result.stdout, /guest tool isolation fixtures passed/);
 });
+
+test('private durable exec uses only SSH stdin, bundles its runtime, and fits the full payload envelope', async () => {
+  let wire;
+  const id = '3a3540e0-ec51-46e6-8d68-041b37894e7a';
+  const body = { tool: 'exec_submit', arguments: { operation_id: id, expected_generation: 2, expected_boot_id: 'current',
+    command: 'fake-command-secret' + '\\'.repeat(32000), timeout_seconds: 900,
+    payload: { data: 'x'.repeat(1048576 - 11) }, redact: Array(20).fill('fake-redact-secret' + '\\'.repeat(4000)), payload_digest: 'a'.repeat(64) } };
+  const guest = new GuestTools({ spawnImpl: transport({ ok: true, result: { operation_id: id, generation: 2, boot_id: 'current', status: 'queued', terminal: false } }, value => { wire = value; }) });
+  await guest.run('computer', target, 'job-exec', body, binding);
+  assert.doesNotMatch(JSON.stringify(wire.args), /fake-command-secret|fake-redact-secret/);
+  const request = JSON.parse(wire.input);
+  assert.equal(request.request.kind, 'job-exec');
+  assert.match(request.exec_source, /def worker\(/);
+  assert.equal(request.request.arguments.payload.data.length, 1048576 - 11);
+  assert.ok(Buffer.byteLength(wire.input) < 2 * 1024 * 1024);
+  await assert.rejects(guest.run('computer', target, 'computer-tools', body, binding), error => error.code === 'unsupported_computer_tool');
+});

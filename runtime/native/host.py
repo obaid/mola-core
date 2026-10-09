@@ -651,6 +651,7 @@ class Runner:
         folder = self.storage_path(identifier, payload['snapshot_id'])
         manifest = self.snapshot_manifest(identifier, payload['snapshot_id'])
         self.validate_snapshot_manifest(identifier, manifest)
+        allocation_bytes = self.disk_allocation_bytes(identifier)
         receipt_path = payload.get('_receipt_path')
         if receipt_path:
             receipt = json.loads(receipt_path.read_text())
@@ -658,6 +659,10 @@ class Runner:
             if prepared:
                 destination = self.folder(identifier) / 'root.ext4'
                 temporary = destination.with_suffix('.restore')
+                candidate = temporary if temporary.exists() else destination
+                if (prepared.get('size_bytes', allocation_bytes) != allocation_bytes
+                        or candidate.stat().st_size != allocation_bytes):
+                    raise ValueError('Prepared restore does not preserve target allocation')
                 if temporary.exists():
                     if self.file_digest(temporary) != prepared['sha256']: raise ValueError('Prepared restore checksum mismatch')
                     self.require_stopped(identifier)
@@ -694,6 +699,10 @@ class Runner:
                 subprocess.run(['python3', str(Path(__file__).with_name('sanitize_clone.py')),
                                 '--disk', str(temporary)], check=True, capture_output=True, timeout=300, **self.storage_subprocess_options())
                 with temporary.open('rb') as stream: os.fsync(stream.fileno())
+            # Original archive/raw checksums were verified above. Growing only
+            # this unpublished filesystem preserves an upgraded allocation when
+            # restoring an older, smaller snapshot; the source stays unchanged.
+            self.grow_restore_stage(temporary, allocation_bytes)
             self.require_stopped(identifier)
             if receipt_path:
                 result = {'id': identifier, 'snapshot_id': manifest['id'], 'status': 'stopped',
@@ -702,7 +711,7 @@ class Runner:
                 prepared_digest = self.file_digest(temporary)
                 with self.storage_state():
                     receipt = json.loads(receipt_path.read_text())
-                    receipt['prepared'] = {'sha256': prepared_digest, 'result': result}
+                    receipt['prepared'] = {'sha256': prepared_digest, 'size_bytes': allocation_bytes, 'result': result}
                     self.save_storage_receipt(receipt_path, receipt)
             temporary.replace(destination)
             self.sync_directory(destination.parent)
@@ -712,6 +721,36 @@ class Runner:
         return {'id': identifier, 'snapshot_id': manifest['id'], 'status': 'stopped',
                 'snapshot_sha256': manifest['sha256'], 'guest_agent_refreshed': bool(self.config.get('guest_agent_refresh', False)),
                 'fork_identity_reset': bool(payload.get('fork', False))}
+
+    def disk_allocation_bytes(self, identifier):
+        physical = (self.folder(identifier) / 'root.ext4').stat().st_size
+        configured = self.metadata(identifier).get('disk_gb')
+        if configured is None: return physical
+        if type(configured) is not int or not 16 <= configured <= 1024:
+            raise ValueError('Invalid target disk allocation')
+        return max(physical, configured * 1024**3)
+
+    def grow_restore_stage(self, temporary, allocation_bytes):
+        if temporary.stat().st_size == allocation_bytes: return
+        if temporary.stat().st_size > allocation_bytes:
+            raise ValueError('Restore exceeds target allocation')
+        if not self.capabilities()['resize_disk_grow']:
+            raise ValueError('Restore disk growth is unsupported on this host')
+        with temporary.open('r+b') as stream:
+            stream.truncate(allocation_bytes); stream.flush(); os.fsync(stream.fileno())
+        check = subprocess.run(['e2fsck', '-fp', str(temporary)], capture_output=True,
+                               timeout=300, **self.storage_subprocess_options())
+        # Repair/replay applies only to verified, unpublished snapshot bytes.
+        # Offline e2fsck 0/1/2 is followed by a mandatory strict read-only check.
+        if check.returncode not in (0, 1, 2):
+            raise ValueError('Restore staging filesystem failed repair')
+        subprocess.run(['resize2fs', str(temporary)], check=True, capture_output=True,
+                       timeout=900, **self.storage_subprocess_options())
+        check = subprocess.run(['e2fsck', '-fn', str(temporary)], capture_output=True,
+                               timeout=300, **self.storage_subprocess_options())
+        if check.returncode != 0:
+            raise ValueError('Restore staging filesystem failed strict validation')
+        with temporary.open('rb') as stream: os.fsync(stream.fileno())
 
     def storage_subprocess_options(self):
         # A transform can outlive a terminated supervisor. On POSIX inherit its
@@ -736,7 +775,7 @@ class Runner:
         if snapshot_image != expected_image: raise ValueError('Snapshot image does not match this machine')
         if manifest.get('format') != 'mola-raw-gzip-v1' or manifest.get('architecture') != self.arch:
             raise ValueError('Snapshot format or architecture mismatch')
-        limit = (self.folder(identifier) / 'root.ext4').stat().st_size
+        limit = self.disk_allocation_bytes(identifier)
         if type(manifest.get('size_bytes')) is not int or not 1 <= manifest['size_bytes'] <= limit:
             raise ValueError('Snapshot disk exceeds target allocation')
         if type(manifest.get('artifact_bytes')) is not int or not 1 <= manifest['artifact_bytes'] <= limit + 1024 * 1024 * 1024:

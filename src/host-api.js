@@ -10,6 +10,7 @@ import { revokeDataPlane } from './data-plane.js';
 import { installedImages } from './installed-images.js';
 import { validateBrowserProxy } from './browser-proxy.js';
 import { GuestTools, COMPUTER_TOOLS } from './guest-tools.js';
+import { HostDurableExec } from './durable-exec.js';
 
 const fail = (status, message, code) => { throw Object.assign(new Error(message), { status, code }); };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -60,8 +61,8 @@ export function hostDescription(record, runtime, settledOperationKey = null) {
  * Tombstones and results are retained to fence delayed messages after deletion.
  */
 export class HostApi {
-  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', images = installedImages(), desktop, action, session, tunnel, snapshotTransfer = null, cua = new CuaSessions(), guestTools = new GuestTools() }) {
-    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, session, tunnel, snapshotTransfer, cua, guestTools });
+  constructor({ registry, runtime, publicKey, token, imageRef = process.env.MOLA_IMAGE_REF || 'omarchy-agent:0.1.0', images = installedImages(), desktop, action, session, tunnel, snapshotTransfer = null, cua = new CuaSessions(), guestTools = new GuestTools(), durableExec = new HostDurableExec() }) {
+    Object.assign(this, { registry, runtime, publicKey, token, imageRef, desktop, action, session, tunnel, snapshotTransfer, cua, guestTools, durableExec });
     this.locks = new Map();
     this.images = images;
   }
@@ -99,7 +100,9 @@ export class HostApi {
     if (request.headers.origin) fail(403, 'Browser origins are not accepted.');
     const method = request.method;
     if (method === 'GET' && parts.length === 1 && parts[0] === 'capabilities') {
-      return { status: 200, body: { data: await this.runtime.capabilities() } };
+      let capabilities = {};
+      try { capabilities = await this.runtime.capabilities(); } catch { /* Storage support does not determine the private exec transport. */ }
+      return { status: 200, body: { data: { ...(capabilities && typeof capabilities === 'object' && !Array.isArray(capabilities) ? capabilities : {}), durable_exec: true, durable_exec_max_timeout_seconds: 900 } } };
     }
     if (method === 'GET' && parts.length === 1 && parts[0] === 'images') {
       return { status: 200, body: { data: [...new Set([this.imageRef, ...Object.keys(this.images)])].map(image_ref => ({ image_ref })) } };
@@ -112,7 +115,12 @@ export class HostApi {
     if (method === 'GET' && parts.length === 2) {
       return { status: 200, body: { data: await this.describe(this.record(parts[1])) } };
     }
-    if (method === 'POST' && parts.length === 3 && (COMPUTER_TOOLS[parts[2]] || ['geometry', 'capture', 'vault-inject', 'view-input'].includes(parts[2]))) {
+    if (method === 'POST' && parts[2] === 'job-exec' && (parts.length === 3 || parts.length === 4 && ['status', 'cancel'].includes(parts[3]))) {
+      return this.locked(parts[1], async () => ({ status: 200, body: { data: await this.durableExec.handle(
+        this, parts[1], parts.length === 3 ? 'submit' : parts[3], body,
+      ) } }));
+    }
+    if (method === 'POST' && parts.length === 3 && (COMPUTER_TOOLS[parts[2]] || ['geometry', 'capture', 'vault-inject', 'view-input', 'network-probe'].includes(parts[2]))) {
       return this.locked(parts[1], async () => {
         const record = this.record(parts[1]);
         if (parts[2] === 'network-tools' && body.tool === 'network_configure') {
@@ -121,13 +129,14 @@ export class HostApi {
           try { validateBrowserProxy(proxy, record.cloud.image_ref); }
           catch { fail(400, 'Invalid managed browser proxy configuration.'); }
         }
-        const viewer = parts[2] === 'capture' || parts[2] === 'view-input' || body.tool === 'viewer_input' || body.tool === 'window_identity' || body.tool === 'window_prepare' || parts[2] === 'network-tools';
+        const viewer = parts[2] === 'capture' || parts[2] === 'view-input' || body.tool === 'viewer_input' || body.tool === 'window_identity' || body.tool === 'window_prepare' || parts[2] === 'network-tools' || parts[2] === 'network-probe';
         const suppliedGeneration = body.expected_generation ?? body.arguments?.expected_generation;
         const expectedGeneration = typeof suppliedGeneration === 'string' && /^[0-9]{1,16}$/.test(suppliedGeneration)
           ? Number(suppliedGeneration) : suppliedGeneration;
         if (viewer && (!Number.isSafeInteger(expectedGeneration) || expectedGeneration !== record.cloud.generation)) fail(409, 'Viewer belongs to a previous generation.', 'viewer_generation_mismatch');
         if (suppliedGeneration !== undefined && (!Number.isSafeInteger(expectedGeneration) || expectedGeneration !== record.cloud.generation)) fail(409, 'Tool belongs to a previous generation.', 'computer_generation_mismatch');
         if (parts[2] === 'vault-inject' && suppliedGeneration !== undefined && (!Number.isSafeInteger(expectedGeneration) || expectedGeneration !== record.cloud.generation)) fail(409, 'Vault injection belongs to a previous generation.', 'vault_generation_mismatch');
+        if (parts[2] === 'network-probe' && body.arguments?.expected_boot_id !== record.boot_id) fail(409, 'Network probe belongs to a previous boot.', 'network_probe_boot_mismatch');
         const target = await this.runtime.describe(record.id);
         if (!hostDescription(record, target).ready) fail(409, 'Machine is not ready.');
         const binding = { generation: record.cloud.generation, boot_id: record.boot_id };

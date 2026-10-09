@@ -117,7 +117,7 @@ class Fixture(unittest.TestCase):
             self.assertEqual(error.exception.status,501);self.assertEqual(command.call_count,2)
     def composite_connection(self, available=True):
         connection=g.WindowConnection.__new__(g.WindowConnection);connection.display=1;connection.window=0x12ab;connection.errors=False
-        connection.border=2;connection.client_dimensions=(2,1)
+        connection.border=2;connection.client_dimensions=(2,1);connection.color_info=(24,[0xff0000,0xff00,0xff]);connection.pixmap_depth=lambda _:24
         class Method:
             def __init__(self,fn):self.fn=fn
             def __call__(self,*args):return self.fn(*args)
@@ -136,13 +136,15 @@ class Fixture(unittest.TestCase):
             def XQueryExtension(self,display,name,opcode,event,error):
                 ctypes.cast(opcode,ctypes.POINTER(ctypes.c_int))[0]=142;return 1
             def XDefaultRootWindow(self,*_):return 1
+            def XGetWindowAttributes(self,display,window,value):
+                ctypes.cast(value,ctypes.POINTER(g.WindowConnection.Attributes)).contents.window_class=1;return 1
             def XGetImage(self,display,drawable,x,y,width,height,planes,format):
                 # Distinct overlapping-window pixels can never be requested:
                 # only the named offscreen buffer, offset past client border.
                 assert drawable==999 and (x,y,width,height)==(2,2,2,1)
                 self.requests.append(drawable)
                 image=g.WindowConnection.Image();image.width=2;image.height=1;image.data=ctypes.addressof(self.buffer)
-                image.bits_per_pixel=32;image.byte_order=0;image.bytes_per_line=8
+                image.bits_per_pixel=32;image.byte_order=0;image.bytes_per_line=8;image.depth=24
                 image.red_mask=0xff0000;image.green_mask=0xff00;image.blue_mask=0xff
                 self.image=image;return ctypes.pointer(self.image)
             def XDestroyImage(self,*_):self.destroyed+=1
@@ -185,6 +187,83 @@ class Fixture(unittest.TestCase):
         with patch.object(g.ctypes,'CDLL',return_value=composite):
             with self.assertRaises(g.ToolError):connection.offscreen_pixmap()
         self.assertEqual(connection.x.requests,[])
+    def test_server_proven_inputonly_hitbox_does_not_contribute_pixels(self):
+        connection,composite=self.ancestor_connection(overlapping=True)
+        def attributes(display,window,value):
+            assert window==3
+            ctypes.cast(value,ctypes.POINTER(g.WindowConnection.Attributes)).contents.window_class=2;return 1
+        with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection.x,'XGetWindowAttributes',side_effect=attributes):
+            self.assertEqual(connection.offscreen_pixmap(),999)
+        self.assertEqual(connection.capture_offset,(4,5))
+    def test_unmapped_inputoutput_overlap_still_refuses(self):
+        connection,composite=self.ancestor_connection(overlapping=True)
+        def attributes(display,window,value):
+            proof=ctypes.cast(value,ctypes.POINTER(g.WindowConnection.Attributes)).contents
+            proof.window_class=1;proof.map_state=0;return 1
+        with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection.x,'XGetWindowAttributes',side_effect=attributes):
+            with self.assertRaises(g.ToolError):connection.offscreen_pixmap()
+        self.assertEqual(connection.x.requests,[])
+    def test_sibling_class_unknown_or_server_error_never_ignored(self):
+        for result,kind,error in [(0,2,False),(1,0,False),(1,3,False),(1,2,True)]:
+            connection,composite=self.ancestor_connection(overlapping=True)
+            def attributes(display,window,value):
+                ctypes.cast(value,ctypes.POINTER(g.WindowConnection.Attributes)).contents.window_class=kind
+                connection.errors=error;return result
+            with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection.x,'XGetWindowAttributes',side_effect=attributes):
+                with self.assertRaises(g.ToolError):connection.offscreen_pixmap()
+            self.assertEqual(connection.x.requests,[])
+    def test_session_window_capture_initializes_display_before_identity(self):
+        class Display(FakeConnection):
+            def __init__(self,window):
+                assert g.os.environ['DISPLAY']==':1'
+                super().__init__(window)
+        with patch.dict(g.os.environ,{},clear=True),patch.object(g,'WindowConnection',Display),patch.object(g,'windows',return_value=[{'id':'0x12ab','x':0,'y':0,'width':2,'height':1}]):
+            value=g.session_windows()
+            self.assertEqual(value[0]['wm_class'],['fixture','Fixture'])
+            self.assertEqual(g.os.environ['DISPLAY'],':1')
+    def shaped_corner(self, rectangles, shaped=True, fail=False, count=None):
+        connection=g.WindowConnection.__new__(g.WindowConnection);connection.display=1;connection.errors=False
+        class X:
+            freed=0
+            def XSync(self,*_):pass
+            def XFree(self,*_):self.freed+=1
+        connection.x=X()
+        class Method:
+            def __init__(self,fn):self.fn=fn
+            def __call__(self,*args):return self.fn(*args)
+        values=(g.WindowConnection.Rectangle*len(rectangles))(*[g.WindowConnection.Rectangle(*rect) for rect in rectangles])
+        def extents(display,window,b,*args):
+            ctypes.cast(b,ctypes.POINTER(ctypes.c_int))[0]=1 if shaped else 0
+            if fail:connection.errors=True
+            return 1
+        def get(display,window,kind,n,ordering):
+            assert kind==0
+            ctypes.cast(n,ctypes.POINTER(ctypes.c_int))[0]=len(rectangles) if count is None else count
+            return ctypes.cast(values,ctypes.POINTER(g.WindowConnection.Rectangle))
+        class Shape:pass
+        shape=Shape();shape.XShapeQueryExtension=Method(lambda *_:1);shape.XShapeQueryExtents=Method(extents);shape.XShapeGetRectangles=Method(get)
+        return connection,shape
+    def test_authoritative_l_shaped_corner_has_no_painted_client_overlap(self):
+        for x,rectangles in [(-5,[[0,0,5,11],[0,11,16,4],[1,15,15,1]]),(473,[[11,0,5,11],[0,11,16,4],[0,15,15,1]])]:
+            connection,shape=self.shaped_corner(rectangles)
+            with patch.object(g.ctypes,'CDLL',return_value=shape):connection.prove_shape_disjoint(3,x,305,484,316)
+            self.assertEqual(connection.x.freed,1)
+    def test_one_painted_shape_pixel_in_client_refuses(self):
+        connection,shape=self.shaped_corner([[0,0,6,11],[0,11,16,4]])
+        with patch.object(g.ctypes,'CDLL',return_value=shape):
+            with self.assertRaises(g.ToolError):connection.prove_shape_disjoint(3,-5,305,484,316)
+        self.assertEqual(connection.x.freed,1)
+    def test_unshaped_overlap_and_shape_read_errors_refuse(self):
+        for shaped,fail in [(False,False),(True,True)]:
+            connection,shape=self.shaped_corner([[0,0,5,11]],shaped,fail)
+            with patch.object(g.ctypes,'CDLL',return_value=shape):
+                with self.assertRaises(g.ToolError):connection.prove_shape_disjoint(3,-5,305,484,316)
+    def test_shape_rectangle_count_is_bounded_before_dereference(self):
+        for count in [-1,257]:
+            connection,shape=self.shaped_corner([[0,0,5,11]],count=count)
+            with patch.object(g.ctypes,'CDLL',return_value=shape):
+                with self.assertRaises(g.ToolError):connection.prove_shape_disjoint(3,-5,305,484,316)
+            self.assertEqual(connection.x.freed,1)
     def test_reparented_missing_child_relation_fails_closed(self):
         connection,composite=self.ancestor_connection(missing_child=True)
         with patch.object(g.ctypes,'CDLL',return_value=composite):
@@ -226,6 +305,39 @@ class Fixture(unittest.TestCase):
         with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection,'drawable_geometry',return_value=(7,5,0)):
             with self.assertRaises(g.ToolError):connection.pixels({'x':0,'y':0,'width':2,'height':1})
         self.assertEqual(connection.x.requests,[]);self.assertEqual(connection.x.freed,[999])
+    def test_zero_pixmap_masks_use_only_authoritative_client_visual(self):
+        connection,composite=self.composite_connection();original=connection.x.XGetImage
+        def image(*arguments):
+            result=original(*arguments);result.contents.red_mask=0;result.contents.green_mask=0;result.contents.blue_mask=0;return result
+        with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection,'drawable_geometry',return_value=(6,5,0)),patch.object(connection.x,'XGetImage',side_effect=image):
+            result=connection.pixels({'x':0,'y':0,'width':2,'height':1})
+        self.assertEqual(result[4],[0xff0000,0xff00,0xff])
+    def test_nonzero_conflicting_masks_or_depth_are_not_guessed(self):
+        for field,value in [('red_mask',0xf800),('depth',16)]:
+            connection,composite=self.composite_connection();original=connection.x.XGetImage
+            def image(*arguments):
+                result=original(*arguments);setattr(result.contents,field,value);return result
+            with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection,'drawable_geometry',return_value=(6,5,0)),patch.object(connection.x,'XGetImage',side_effect=image):
+                with self.assertRaises(g.ToolError):connection.pixels({'x':0,'y':0,'width':2,'height':1})
+            self.assertEqual(connection.x.destroyed,1);self.assertEqual(connection.x.freed,[999])
+    def test_pixmap_depth_must_match_client_visual(self):
+        connection,composite=self.composite_connection();connection.pixmap_depth=lambda _:16
+        with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection,'drawable_geometry',return_value=(6,5,0)):
+            with self.assertRaises(g.ToolError):connection.pixels({'x':0,'y':0,'width':2,'height':1})
+        self.assertEqual(connection.x.requests,[]);self.assertEqual(connection.x.freed,[999])
+    def test_client_visual_requires_truecolor_valid_disjoint_masks(self):
+        for klass,masks,allowed in [(4,[0xff0000,0xff00,0xff],True),(5,[0xff0000,0xff00,0xff],False),(4,[0,0,0],False),(4,[0xff0000,0xff0000,0xff],False)]:
+            connection=g.WindowConnection.__new__(g.WindowConnection);connection.display=1;connection.window=2;connection.errors=False
+            visual=g.WindowConnection.Visual();visual.visual_class=klass;visual.red_mask,visual.green_mask,visual.blue_mask=masks
+            class X:
+                def XSync(self,*_):pass
+                def XGetWindowAttributes(self,display,window,value):
+                    attributes=ctypes.cast(value,ctypes.POINTER(g.WindowConnection.Attributes)).contents
+                    attributes.window_class=1;attributes.depth=24;attributes.visual=ctypes.addressof(visual);return 1
+            connection.x=X()
+            if allowed:self.assertEqual(connection.client_color(),(24,masks))
+            else:
+                with self.assertRaises(g.ToolError):connection.client_color()
     def property_connection(self, value=None, kind=31, format=8, after=0):
         connection=g.WindowConnection.__new__(g.WindowConnection);connection.display=1;connection.window=0x12ab;connection.errors=False
         class X:

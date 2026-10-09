@@ -531,7 +531,7 @@ pathlib.Path(sys.argv[-1]).write_bytes(b'finished staging write')
 ''')
         executable.chmod(0o700)
         script = '''
-import importlib.util, pathlib, sys, threading, subprocess, os
+import importlib.util, pathlib, sys, threading, subprocess, os, time
 spec = importlib.util.spec_from_file_location('mola_host', sys.argv[1])
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 r = m.Runner.__new__(m.Runner)
@@ -543,8 +543,24 @@ def transform(identifier, verb, payload):
     options['env'].update(PATH=str(r.root / 'tools') + os.pathsep + os.environ.get('PATH', ''),
                           WRITER_READY=str(r.root / 'writer-ready'), WRITER_RELEASE=str(r.root / 'writer-release'))
     helper = 'import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); import sanitize_clone; sanitize_clone.debugfs(Path(sys.argv[2]), "rm /identity", writable=True)'
-    subprocess.run([sys.executable, '-c', helper, str(pathlib.Path(sys.argv[1]).resolve().parent), str(r.root / 'staging-only.ext4')],
-                   timeout=0.5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **options)
+    child = subprocess.Popen([sys.executable, '-c', helper, str(pathlib.Path(sys.argv[1]).resolve().parent), str(r.root / 'staging-only.ext4')],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **options)
+    # Establish that the nested writer actually owns the inherited lease before
+    # starting the timeout. Interpreter startup under parallel suites is not the
+    # behavior this regression is intended to measure.
+    deadline = time.monotonic() + 10
+    while not (r.root / 'writer-ready').exists() and child.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if not (r.root / 'writer-ready').exists():
+        child.kill(); child.wait()
+        raise AssertionError('nested writer never acknowledged startup')
+    try:
+        child.communicate(timeout=0.5)
+    except subprocess.TimeoutExpired:
+        # Match subprocess.run's helper-only timeout kill. Its nested writer
+        # must survive with the lease, forcing supervisor exit/pending receipt.
+        child.kill(); child.wait()
+        raise
     raise AssertionError('test transformation unexpectedly finished')
 r.storage_operation = transform
 server = m.ThreadingHTTPServer(('127.0.0.1', 0), m.Handler)
@@ -561,6 +577,9 @@ server.serve_forever()
             body = {'operation_id': 'timeout-restore', 'generation': 1, 'snapshot_id': SNAPSHOT}
             request = urllib.request.Request(url, data=json.dumps(body).encode(), headers={'Authorization': 'Bearer test-token'})
             with urllib.request.urlopen(request, timeout=1) as response: assert response.status == 202
+            deadline = time.monotonic() + 10
+            while not ready.exists() and supervisor.poll() is None and time.monotonic() < deadline: time.sleep(0.01)
+            assert ready.exists(), 'nested writer never acknowledged startup'
             assert supervisor.wait(timeout=3) == 75, 'unsafe timeout kept supervisor admitting disk mutations'
             assert ready.exists(), 'nested writer was not alive at timeout'
             receipt = json.loads(runner.operation_path(ID, 'restore', body['operation_id']).read_text())

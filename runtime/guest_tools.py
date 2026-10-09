@@ -400,6 +400,22 @@ class WindowConnection:
                    ('red_mask', ctypes.c_ulong), ('green_mask', ctypes.c_ulong), ('blue_mask', ctypes.c_ulong)]
     class ClassHint(ctypes.Structure):
         _fields_ = [('name', ctypes.c_void_p), ('klass', ctypes.c_void_p)]
+    class Attributes(ctypes.Structure):
+        # Full XWindowAttributes ABI, not an undersized buffer: Xlib writes
+        # every member even though this guard only needs the immutable class.
+        _fields_ = [('x',ctypes.c_int),('y',ctypes.c_int),('width',ctypes.c_int),('height',ctypes.c_int),
+                   ('border_width',ctypes.c_int),('depth',ctypes.c_int),('visual',ctypes.c_void_p),('root',ctypes.c_ulong),
+                   ('window_class',ctypes.c_int),('bit_gravity',ctypes.c_int),('win_gravity',ctypes.c_int),
+                   ('backing_store',ctypes.c_int),('backing_planes',ctypes.c_ulong),('backing_pixel',ctypes.c_ulong),
+                   ('save_under',ctypes.c_int),('colormap',ctypes.c_ulong),('map_installed',ctypes.c_int),
+                   ('map_state',ctypes.c_int),('all_event_masks',ctypes.c_long),('your_event_mask',ctypes.c_long),
+                   ('do_not_propagate_mask',ctypes.c_long),('override_redirect',ctypes.c_int),('screen',ctypes.c_void_p)]
+    class Rectangle(ctypes.Structure):
+        _fields_ = [('x',ctypes.c_short),('y',ctypes.c_short),('width',ctypes.c_ushort),('height',ctypes.c_ushort)]
+    class Visual(ctypes.Structure):
+        _fields_ = [('ext_data',ctypes.c_void_p),('visual_id',ctypes.c_ulong),('visual_class',ctypes.c_int),
+                   ('red_mask',ctypes.c_ulong),('green_mask',ctypes.c_ulong),('blue_mask',ctypes.c_ulong),
+                   ('bits_per_rgb',ctypes.c_int),('map_entries',ctypes.c_int)]
     class XError(ctypes.Structure):
         _fields_ = [('type',ctypes.c_int),('display',ctypes.c_void_p),('resource',ctypes.c_ulong),
                    ('serial',ctypes.c_ulong),('code',ctypes.c_ubyte),('request',ctypes.c_ubyte),('minor',ctypes.c_ubyte)]
@@ -429,6 +445,7 @@ class WindowConnection:
             bind(self.x,'XGetWindowProperty',integer,[ptr,xid,xid,ctypes.c_long,ctypes.c_long,integer,xid,ctypes.POINTER(xid),ctypes.POINTER(integer),ctypes.POINTER(xid),ctypes.POINTER(xid),ctypes.POINTER(ptr)])
             bind(self.x,'XChangeProperty',integer,[ptr,xid,xid,xid,integer,integer,ptr,integer])
             bind(self.x,'XGetClassHint',integer,[ptr,xid,ctypes.POINTER(self.ClassHint)])
+            bind(self.x,'XGetWindowAttributes',integer,[ptr,xid,ctypes.POINTER(self.Attributes)])
             bind(self.x,'XDefaultRootWindow',xid,[ptr])
             bind(self.x,'XQueryExtension',integer,[ptr,ctypes.c_char_p,*[ctypes.POINTER(integer)]*3])
             bind(self.x,'XQueryTree',integer,[ptr,xid,ctypes.POINTER(xid),ctypes.POINTER(xid),ctypes.POINTER(ctypes.POINTER(xid)),ctypes.POINTER(ctypes.c_uint)])
@@ -529,7 +546,24 @@ class WindowConnection:
         w,h,self.border=self.drawable_geometry(self.window)
         require(w<=3840 and h<=2160,'window_geometry_unavailable')
         self.client_dimensions=(w,h)
+        self.color_info=self.client_color()
         return {'width':w,'height':h}
+    def client_color(self):
+        attributes=self.Attributes()
+        require(self.x.XGetWindowAttributes(self.display,self.window,ctypes.byref(attributes))!=0,'window_capture_unsupported',501)
+        self.x.XSync(self.display,0)
+        require(not self.errors and attributes.window_class==1 and attributes.visual and attributes.depth in [16,24,30,32],'window_capture_unsupported',501)
+        visual=ctypes.cast(attributes.visual,ctypes.POINTER(self.Visual)).contents
+        masks=[visual.red_mask,visual.green_mask,visual.blue_mask]
+        require(visual.visual_class==4 and all(mask>0 for mask in masks)
+                and not (masks[0]&masks[1] or masks[0]&masks[2] or masks[1]&masks[2])
+                and (masks[0]|masks[1]|masks[2])<(1<<attributes.depth),'window_capture_unsupported',501)
+        return attributes.depth,masks
+    def pixmap_depth(self,pixmap):
+        root=ctypes.c_ulong();x,y=ctypes.c_int(),ctypes.c_int();w,h,b,d=(ctypes.c_uint() for _ in range(4))
+        require(self.x.XGetGeometry(self.display,pixmap,ctypes.byref(root),ctypes.byref(x),ctypes.byref(y),ctypes.byref(w),ctypes.byref(h),ctypes.byref(b),ctypes.byref(d))!=0,'window_capture_unsupported',501)
+        self.x.XSync(self.display,0);require(not self.errors,'window_identity_changed')
+        return d.value
     def offscreen_pixmap(self):
         # XGetImage(window) has undefined pixels where another window obscures
         # it. Only an existing compositor's verified offscreen pixmap is safe.
@@ -575,7 +609,8 @@ class WindowConnection:
         require(pixmap,'window_capture_unsupported',501)
         try:
             w,h,pixmap_border=self.drawable_geometry(pixmap)
-            require(pixmap_border==0 and (w,h)==(width+2*border,height+2*border),'window_capture_unsupported',501)
+            require(pixmap_border==0 and (w,h)==(width+2*border,height+2*border)
+                    and self.pixmap_depth(pixmap)==self.color_info[0],'window_capture_unsupported',501)
             return pixmap
         except Exception:
             self.x.XFreePixmap(self.display,pixmap);raise
@@ -603,10 +638,49 @@ class WindowConnection:
             require(x>=0 and y>=0 and x+width<=w and y+height<=h,'window_capture_unsupported',501)
             for sibling in siblings:
                 if sibling==child:continue
+                if self.window_class(sibling)==2:continue
                 sw,sh,border=self.drawable_geometry(sibling);sx,sy=self.translate(sibling,self.window)
                 # Even an unmapped sibling is conservatively rejected. No
                 # non-path window can contribute pixels inside this crop.
-                require(not (sx-border<width and sx+sw+border>0 and sy-border<height and sy+sh+border>0),'window_capture_unsupported',501)
+                if sx-border<width and sx+sw+border>0 and sy-border<height and sy+sh+border>0:
+                    self.prove_shape_disjoint(sibling,sx,sy,width,height)
+    def window_class(self,window):
+        value=self.Attributes()
+        require(self.x.XGetWindowAttributes(self.display,window,ctypes.byref(value))!=0,'window_capture_unsupported',501)
+        self.x.XSync(self.display,0)
+        require(not self.errors and value.window_class in [1,2],'window_capture_unsupported',501)
+        # X server InputOnly windows have no graphics and cannot have
+        # InputOutput descendants. Ignore only this authenticated class.
+        return value.window_class
+    def prove_shape_disjoint(self,window,x,y,width,height):
+        # XFWM painted resize corners have L-shaped bounding regions. Only
+        # authoritative ShapeBounding rectangles may prove a nominal overlap
+        # contains no pixels; never infer transparency from title/class/name.
+        rectangles=None
+        try:
+            shape=ctypes.CDLL(ctypes.util.find_library('Xext') or 'libXext.so.6')
+            integer,ptr=ctypes.c_int,ctypes.c_void_p
+            shape.XShapeQueryExtension.restype=integer;shape.XShapeQueryExtension.argtypes=[ptr,ctypes.POINTER(integer),ctypes.POINTER(integer)]
+            shape.XShapeQueryExtents.restype=integer
+            shape.XShapeQueryExtents.argtypes=[ptr,ctypes.c_ulong,ctypes.POINTER(integer),ctypes.POINTER(integer),ctypes.POINTER(integer),ctypes.POINTER(ctypes.c_uint),ctypes.POINTER(ctypes.c_uint),ctypes.POINTER(integer),ctypes.POINTER(integer),ctypes.POINTER(integer),ctypes.POINTER(ctypes.c_uint),ctypes.POINTER(ctypes.c_uint)]
+            shape.XShapeGetRectangles.restype=ctypes.POINTER(self.Rectangle)
+            shape.XShapeGetRectangles.argtypes=[ptr,ctypes.c_ulong,integer,ctypes.POINTER(integer),ctypes.POINTER(integer)]
+            event,error=integer(),integer()
+            require(shape.XShapeQueryExtension(self.display,ctypes.byref(event),ctypes.byref(error))!=0,'window_capture_unsupported',501)
+            bounding,clip=integer(),integer();bx,by,cx,cy=(integer() for _ in range(4));bw,bh,cw,ch=(ctypes.c_uint() for _ in range(4))
+            require(shape.XShapeQueryExtents(self.display,window,ctypes.byref(bounding),ctypes.byref(bx),ctypes.byref(by),ctypes.byref(bw),ctypes.byref(bh),ctypes.byref(clip),ctypes.byref(cx),ctypes.byref(cy),ctypes.byref(cw),ctypes.byref(ch))!=0,'window_capture_unsupported',501)
+            self.x.XSync(self.display,0);require(not self.errors and bounding.value==1,'window_capture_unsupported',501)
+            count,ordering=integer(),integer()
+            rectangles=shape.XShapeGetRectangles(self.display,window,0,ctypes.byref(count),ctypes.byref(ordering))
+            self.x.XSync(self.display,0)
+            require(not self.errors and 0<=count.value<=256 and (bool(rectangles) or count.value==0 and bw.value==0 and bh.value==0),'window_capture_unsupported',501)
+            for index in range(count.value):
+                rect=rectangles[index]
+                if not rect.width or not rect.height:continue
+                require(not (x+rect.x<width and x+rect.x+rect.width>0 and y+rect.y<height and y+rect.y+rect.height>0),'window_capture_unsupported',501)
+        except (OSError,AttributeError):raise ToolError('window_capture_unsupported',501) from None
+        finally:
+            if rectangles:self.x.XFree(rectangles)
     def probe_offscreen(self):
         self.bounds();pixmap=self.offscreen_pixmap()
         self.x.XFreePixmap(self.display,pixmap)
@@ -618,8 +692,11 @@ class WindowConnection:
             self.x.XSync(self.display,0);require(bool(image) and not self.errors,'window_capture_unavailable')
             value=image.contents
             require(value.bits_per_pixel in [16,24,32] and value.byte_order in [0,1] and value.width*value.bits_per_pixel//8<=value.bytes_per_line<=65536 and value.height==crop['height'] and value.width==crop['width'],'window_capture_unsupported',501)
+            require(value.depth==self.color_info[0],'window_capture_unsupported',501)
+            masks=[value.red_mask,value.green_mask,value.blue_mask]
+            require(masks==[0,0,0] or masks==self.color_info[1],'window_capture_unsupported',501)
             raw=ctypes.string_at(value.data,value.bytes_per_line*value.height)
-            return raw,value.bytes_per_line,value.bits_per_pixel,value.byte_order,[value.red_mask,value.green_mask,value.blue_mask]
+            return raw,value.bytes_per_line,value.bits_per_pixel,value.byte_order,self.color_info[1]
         finally:
             if image:self.x.XDestroyImage(image)
             self.x.XFreePixmap(self.display,pixmap)
@@ -666,6 +743,7 @@ def window_prepare(arguments):
 
 
 def session_windows():
+    desktop_env()
     result=[]
     for window in windows():
         try:
@@ -1326,6 +1404,23 @@ def network(tool, arguments):
     return result
 
 
+def job_exec(tool,arguments,binding):
+    source=globals().get('__exec_source__');require(isinstance(source,str) and source,'exec_source_unavailable',501)
+    namespace={};exec(source,namespace)
+    try:return namespace['dispatch'](tool,arguments,binding,source)
+    except namespace['ExecError'] as error:raise ToolError(error.code,error.status) from None
+
+
+def network_probe(arguments,binding):
+    source=globals().get('__egress_source__');require(isinstance(source,str) and source,'network_egress_unavailable',501)
+    bootstrap="import json,sys; p=json.load(sys.stdin); n={'__name__':'mola_egress'}; exec(p['source'],n); print(json.dumps(n['probe'](p['arguments'],p['binding'])))"
+    try:
+        response=subprocess.run(['sudo','-n','python3','-c',bootstrap],input=json.dumps({'source':source,'arguments':arguments,'binding':binding}),capture_output=True,text=True,timeout=12)
+        require(response.returncode==0,'network_egress_unverified',503)
+        return json.loads(response.stdout)
+    except (OSError,subprocess.SubprocessError,ValueError):raise ToolError('network_egress_unverified',503) from None
+
+
 def dispatch(request):
     try:
         require(isinstance(request, dict)); kind = request.get('kind')
@@ -1333,6 +1428,8 @@ def dispatch(request):
         require(isinstance(arguments, dict))
         if kind == 'browser': result = browser(request['tool'], arguments)
         elif kind == 'geometry': result = geometry(arguments)
+        elif kind == 'network-probe': result = network_probe(arguments,request.get('binding',{}))
+        elif kind == 'job-exec': result = job_exec(request['tool'],arguments,request.get('binding',{}))
         elif kind == 'capture': result = capture(arguments)
         elif kind == 'vault-inject': result = vault(arguments)
         elif kind == 'apps': result = apps(request['tool'], arguments)
