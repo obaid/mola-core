@@ -299,12 +299,19 @@ resource budget, generic app injection, or running-checkpoint parity by themselv
 
 The isolated AX42 Ubuntu 24.04-4 guest additionally exercised actual browser
 login/TOTP, scoped DOM input, stop/Wake profile persistence, display persistence,
-20→40GB disk growth with 8 CPUs/16GB RAM, a 125-second detached installer, and
+20→40→80 GB disk growth with 8 CPUs/16 GB RAM, restoration of an older 40 GB
+snapshot while preserving the 80 GB allocation, a 125-second detached installer, and
 running-checkpoint resume/thaw after a native-worker crash. Native-window proof
 captured only a blue window hidden behind a green window, delivered a subscribed
 pointer event without global focus changes, and rejected the old nonce after
 the same process recreated the same X11 ID. This qualifies that image and those
 paths; it does not promise that every application accepts synthetic input.
+
+A separate frozen-source canary completed a 125-second durable exec with a
+900-second deadline after a lost submission reply, with exactly one execution,
+typed payload/run identity and redacted stdout/stderr. Changed payloads were
+refused. Worker loss remained nonterminal and did not replay; timeout and
+cancellation became terminal only after the original scopes were empty.
 
 ### Private independent egress checker
 
