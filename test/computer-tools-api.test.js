@@ -25,6 +25,35 @@ test('a boot change during capture discards pixels and returns a generation erro
   api.guestTools.run = async () => { record.boot_id = 'other-boot'; return { image_base64: 'must-not-return' }; };
   await assert.rejects(api.handle(request, ['machines', 'computer', 'capture'], { expected_generation: 2, mode: 'desktop' }), error => error.code === 'tool_boot_changed');
 });
+test('cloud display resizing accepts the current generation and persists only confirmed dimensions', async () => {
+  const { api, record, calls } = fixture();
+  record.cloud.create_spec = { image_ref: 'ubuntu-xfce:24.04-4' };
+  api.guestTools.run = async (...args) => { calls.push(args); return { width: 1280, height: 720 }; };
+  const result = await api.handle(request, ['machines', record.id, 'geometry'], { expected_generation: 2, width: 1280, height: 720 });
+  assert.equal(result.status, 200);
+  assert.deepEqual(record.display, { width: 1280, height: 720 });
+  assert.deepEqual(record.cloud.create_spec.display, record.display);
+  assert.deepEqual(calls[0].at(-1), { generation: 2, boot_id: 'boot' });
+});
+test('invalid and stale display changes never reach the guest', async () => {
+  const { api, calls } = fixture();
+  for (const body of [
+    { expected_generation: 2, width: 1280 },
+    { expected_generation: 2, width: 1280, height: 720, unexpected: true },
+    { expected_generation: 2, width: 1280, height: 720.5 },
+  ]) await assert.rejects(api.handle(request, ['machines', 'computer', 'geometry'], body), error => error.status === 400);
+  await assert.rejects(api.handle(request, ['machines', 'computer', 'geometry'], { expected_generation: 1, width: 1280, height: 720 }), error => error.status === 409);
+  assert.equal(calls.length, 0);
+});
+test('unconfirmed guest dimensions do not replace the saved display', async () => {
+  const { api, record } = fixture();
+  record.display = { width: 1024, height: 768 };
+  record.cloud.create_spec = { display: record.display };
+  api.guestTools.run = async () => ({ width: 1280, height: 800 });
+  await assert.rejects(api.handle(request, ['machines', record.id, 'geometry'], { expected_generation: 2, width: 1280, height: 720 }), error => error.status === 502);
+  assert.deepEqual(record.display, { width: 1024, height: 768 });
+  assert.deepEqual(record.cloud.create_spec.display, record.display);
+});
 test('private window identity and compositor setup require the current generation before touching the guest', async () => {
   const {api,calls}=fixture();
   for (const tool of ['window_identity','window_prepare']) {

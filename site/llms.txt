@@ -204,7 +204,7 @@ client; or Linux x86_64 with `qemu-system-x86_64` and a usable `/dev/kvm`.
 
 ## Hosted storage and cloud agents
 
-Mola Core 1.9.0 uses durable operation/generation-bound receipts for private
+Mola Core 1.9.1 uses durable operation/generation-bound receipts for private
 host storage. A pending snapshot or restore returns HTTP 202; reconcile the
 same receipt and retain disk ownership until a terminal result. Restore stages
 and verifies the disk before atomic replacement. See the
