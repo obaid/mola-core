@@ -82,6 +82,39 @@ class Fixture(unittest.TestCase):
         with patch.object(g,'WindowConnection',FakeConnection),patch.object(g,'windows',return_value=[{'id':'0x12ab','x':0,'y':0,'width':2,'height':1}]):
             windows=g.session_windows();self.assertEqual(windows[0]['wm_class'],IDENTITY['wm_class'])
             self.assertNotIn('title',windows[0]);self.assertNotIn('pid',windows[0])
+    def test_identity_admission_probes_before_issuance_and_returns_no_pixels(self):
+        minted=[]
+        class Ready(FakeConnection):
+            def identity(self,**kwargs):minted.append(kwargs.get('create_instance',False));return IDENTITY.copy()
+            def probe_offscreen(self):self.trace.append('probe')
+        with patch.object(g,'WindowConnection',Ready),patch.object(g,'command') as command:
+            result=g.window_identity({'window_id':'0x12ab'})
+            self.assertEqual(result,IDENTITY);command.assert_not_called()
+        self.assertEqual(minted,[False,True]);self.assertIn('probe',FakeConnection.trace)
+    def test_missing_offscreen_buffer_prevents_identity_nonce_issuance(self):
+        minted=[]
+        class Unsupported(FakeConnection):
+            def identity(self,**kwargs):minted.append(kwargs.get('create_instance',False));return IDENTITY.copy()
+            def probe_offscreen(self):raise g.ToolError('window_capture_unsupported',501)
+        with patch.object(g,'WindowConnection',Unsupported):
+            with self.assertRaises(g.ToolError) as error:g.window_identity({'window_id':'0x12ab'})
+        self.assertEqual(error.exception.status,501);self.assertEqual(minted,[False])
+    def test_compositor_preparation_requires_explicit_consent_before_any_change(self):
+        for value in [None,False,'true',1]:
+            with patch.object(g,'command') as command:
+                with self.assertRaises(g.ToolError):g.window_prepare({'window_id':'0x12ab','allow_compositor':value})
+                command.assert_not_called()
+    def test_compositor_preparation_sets_only_known_xfce_boolean_then_proves_buffer(self):
+        class Ready(FakeConnection):
+            def probe_offscreen(self):self.trace.append('probe')
+        with patch.object(g,'WindowConnection',Ready),patch.object(g,'command',side_effect=['100','false','']) as command,patch.object(g.os,'readlink',return_value='/usr/bin/xfwm4'):
+            self.assertEqual(g.window_prepare({'window_id':'0x12ab','allow_compositor':True}),{'success':True})
+            self.assertEqual(command.call_args_list[2].args[0],['/usr/bin/xfconf-query','-c','xfwm4','-p','/general/use_compositing','-s','true'])
+        self.assertIn('probe',FakeConnection.trace)
+    def test_unsupported_desktop_never_changes_config(self):
+        with patch.object(g,'WindowConnection',FakeConnection),patch.object(g,'command',side_effect=['100','unknown']) as command,patch.object(g.os,'readlink',return_value='/usr/bin/xfwm4'):
+            with self.assertRaises(g.ToolError) as error:g.window_prepare({'window_id':'0x12ab','allow_compositor':True})
+            self.assertEqual(error.exception.status,501);self.assertEqual(command.call_count,2)
     def composite_connection(self, available=True):
         connection=g.WindowConnection.__new__(g.WindowConnection);connection.display=1;connection.window=0x12ab;connection.errors=False
         connection.border=2;connection.client_dimensions=(2,1)
@@ -100,6 +133,9 @@ class Fixture(unittest.TestCase):
             def __init__(self):self.requests=[];self.freed=[];self.destroyed=0
             buffer=ctypes.create_string_buffer(bytes([0,0,255,0,0,255,0,0]))
             def XSync(self,*_):pass
+            def XQueryExtension(self,display,name,opcode,event,error):
+                ctypes.cast(opcode,ctypes.POINTER(ctypes.c_int))[0]=142;return 1
+            def XDefaultRootWindow(self,*_):return 1
             def XGetImage(self,display,drawable,x,y,width,height,planes,format):
                 # Distinct overlapping-window pixels can never be requested:
                 # only the named offscreen buffer, offset past client border.
@@ -112,6 +148,68 @@ class Fixture(unittest.TestCase):
             def XDestroyImage(self,*_):self.destroyed+=1
             def XFreePixmap(self,display,pixmap):self.freed.append(pixmap)
         connection.x=X();return connection,composite
+    def ancestor_connection(self, overlapping=False, missing_child=False, geometry_changed=False):
+        connection,composite=self.composite_connection();connection.failures=[]
+        original_name=composite.XCompositeNameWindowPixmap
+        def name(display,window):
+            if window==0x12ab:
+                connection.errors=True;connection.failures.append((8,142,6));return 998
+            assert window==2;return 999
+        original_name.fn=name
+        trees={0x12ab:(1,2,[]),2:(1,1,([3] if missing_child else [0x12ab,3]))}
+        def tree(window):return trees[window]
+        def geometry(window):
+            if window==2:return 12,8,1
+            if window==3:return 12,2,0
+            if window==999:return (15 if geometry_changed else 14),10,0
+            raise AssertionError('unexpected geometry')
+        def translate(source,target):
+            if (source,target)==(0x12ab,2):return 3,4
+            if (source,target)==(3,0x12ab):return -3,(-1 if overlapping else -4)
+            raise AssertionError('unexpected translation')
+        connection.tree=tree;connection.drawable_geometry=geometry;connection.translate=translate
+        return connection,composite
+    def test_reparented_client_uses_only_translated_client_rectangle_not_frame_border(self):
+        connection,composite=self.ancestor_connection()
+        original=connection.x.XGetImage
+        def image(display,drawable,x,y,*arguments):
+            self.assertEqual((drawable,x,y),(999,4,5))
+            return original(display,drawable,2,2,*arguments)
+        with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection.x,'XGetImage',side_effect=image):
+            connection.pixels({'x':0,'y':0,'width':2,'height':1})
+        self.assertEqual(connection.capture_offset,(4,5))
+        self.assertEqual(connection.x.freed,[999])
+        self.assertFalse(connection.errors)
+    def test_intersecting_nonpath_sibling_refuses_before_any_frame_read(self):
+        connection,composite=self.ancestor_connection(overlapping=True)
+        with patch.object(g.ctypes,'CDLL',return_value=composite):
+            with self.assertRaises(g.ToolError):connection.offscreen_pixmap()
+        self.assertEqual(connection.x.requests,[])
+    def test_reparented_missing_child_relation_fails_closed(self):
+        connection,composite=self.ancestor_connection(missing_child=True)
+        with patch.object(g.ctypes,'CDLL',return_value=composite):
+            with self.assertRaises(g.ToolError) as error:connection.offscreen_pixmap()
+        self.assertEqual(error.exception.code,'window_identity_changed');self.assertEqual(connection.x.requests,[])
+    def test_ancestor_pixmap_geometry_race_discards_buffer(self):
+        connection,composite=self.ancestor_connection(geometry_changed=True)
+        with patch.object(g.ctypes,'CDLL',return_value=composite):
+            with self.assertRaises(g.ToolError):connection.offscreen_pixmap()
+        self.assertEqual(connection.x.requests,[]);self.assertEqual(connection.x.freed,[999])
+    def test_root_and_cyclic_ancestor_are_never_named(self):
+        for parent in [1,0,0x12ab]:
+            connection,composite=self.ancestor_connection()
+            connection.tree=lambda _: (1,parent,[])
+            with patch.object(g.ctypes,'CDLL',return_value=composite):
+                with self.assertRaises(g.ToolError):connection.offscreen_pixmap()
+            self.assertEqual(connection.x.requests,[])
+    def test_other_x_errors_never_advance_to_parent(self):
+        connection,composite=self.ancestor_connection()
+        def missing(display,window):
+            connection.errors=True;connection.failures.append((3,142,6));return 998
+        composite.XCompositeNameWindowPixmap.fn=missing
+        with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection,'tree') as tree:
+            with self.assertRaises(g.ToolError):connection.offscreen_pixmap()
+            tree.assert_not_called()
     def test_capture_reads_named_pixmap_client_area_and_releases_resources(self):
         connection,composite=self.composite_connection()
         with patch.object(g.ctypes,'CDLL',return_value=composite),patch.object(connection,'drawable_geometry',return_value=(6,5,0)):

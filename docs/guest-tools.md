@@ -161,12 +161,24 @@ fail closed, even within the same process. Scoped capture verifies this identity
 and reads only an existing XComposite offscreen pixmap through one X connection
 under a short server grab. Missing compositor/redirection is 501; reading the
 window framebuffer directly is not a fallback, because obscured pixels are
-undefined. Client-area crops exclude the pixmap border. Scoped pointer events target that
+undefined. A reparented client can use a verified ancestor buffer only when
+every ancestor contains the client rectangle and every non-path sibling lies
+outside it. The root is never captured. Translation and borders are checked
+under the same server grab; only the exact client-area crop is read. Scoped pointer events target that
 window on the same connection; they do not move the global pointer or focus.
 Applications may ignore synthetic events. Window keyboard input remains
 unsupported. A restarted process, guest reboot, changed WM_CLASS or XID reused by another process
 fails closed. The nonce also fences same-process window recreation; this is not isolation
 from a malicious app or guest with X server access. Content changes inside the same bound window remain visible.
+
+Private `window_identity {window_id,expected_generation}` verifies a usable
+offscreen buffer before minting a missing nonce and returns no pixels. Private
+`window_prepare {window_id,expected_generation,allow_compositor:true}` is separate
+explicit setup: enables only the existing XFCE compositor boolean if disabled,
+then verifies the exact target buffer within eight seconds. It never installs
+packages, redirects a window on capture, or changes settings without consent.
+Unsupported desktops fail closed; an explicitly enabled setting is not rolled
+back if later verification fails.
 
 Internal `viewer_input` accepts
 `{expected_generation,scope:{mode,window_id?,window_identity?,browser_tab?,crop?},input:{action,...}}`.

@@ -121,7 +121,7 @@ export class HostApi {
           try { validateBrowserProxy(proxy, record.cloud.image_ref); }
           catch { fail(400, 'Invalid managed browser proxy configuration.'); }
         }
-        const viewer = parts[2] === 'capture' || parts[2] === 'view-input' || body.tool === 'viewer_input' || body.tool === 'window_identity' || parts[2] === 'network-tools';
+        const viewer = parts[2] === 'capture' || parts[2] === 'view-input' || body.tool === 'viewer_input' || body.tool === 'window_identity' || body.tool === 'window_prepare' || parts[2] === 'network-tools';
         const suppliedGeneration = body.expected_generation ?? body.arguments?.expected_generation;
         const expectedGeneration = typeof suppliedGeneration === 'string' && /^[0-9]{1,16}$/.test(suppliedGeneration)
           ? Number(suppliedGeneration) : suppliedGeneration;

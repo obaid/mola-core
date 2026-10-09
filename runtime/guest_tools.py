@@ -400,6 +400,9 @@ class WindowConnection:
                    ('red_mask', ctypes.c_ulong), ('green_mask', ctypes.c_ulong), ('blue_mask', ctypes.c_ulong)]
     class ClassHint(ctypes.Structure):
         _fields_ = [('name', ctypes.c_void_p), ('klass', ctypes.c_void_p)]
+    class XError(ctypes.Structure):
+        _fields_ = [('type',ctypes.c_int),('display',ctypes.c_void_p),('resource',ctypes.c_ulong),
+                   ('serial',ctypes.c_ulong),('code',ctypes.c_ubyte),('request',ctypes.c_ubyte),('minor',ctypes.c_ubyte)]
     class Event(ctypes.Structure):
         _fields_ = [('type', ctypes.c_int), ('serial', ctypes.c_ulong), ('send_event', ctypes.c_int),
                    ('display', ctypes.c_void_p), ('window', ctypes.c_ulong), ('root', ctypes.c_ulong),
@@ -427,6 +430,9 @@ class WindowConnection:
             bind(self.x,'XChangeProperty',integer,[ptr,xid,xid,xid,integer,integer,ptr,integer])
             bind(self.x,'XGetClassHint',integer,[ptr,xid,ctypes.POINTER(self.ClassHint)])
             bind(self.x,'XDefaultRootWindow',xid,[ptr])
+            bind(self.x,'XQueryExtension',integer,[ptr,ctypes.c_char_p,*[ctypes.POINTER(integer)]*3])
+            bind(self.x,'XQueryTree',integer,[ptr,xid,ctypes.POINTER(xid),ctypes.POINTER(xid),ctypes.POINTER(ctypes.POINTER(xid)),ctypes.POINTER(ctypes.c_uint)])
+            bind(self.x,'XTranslateCoordinates',integer,[ptr,xid,xid,integer,integer,ctypes.POINTER(integer),ctypes.POINTER(integer),ctypes.POINTER(xid)])
             bind(self.x,'XFreePixmap',integer,[ptr,xid])
             bind(self.x,'XGetGeometry',integer,[ptr,xid,ctypes.POINTER(xid),*[ctypes.POINTER(integer)]*2,*[ctypes.POINTER(ctypes.c_uint)]*4])
             bind(self.x,'XGetImage',ctypes.POINTER(self.Image),[ptr,xid,integer,integer,ctypes.c_uint,ctypes.c_uint,xid,integer])
@@ -437,7 +443,8 @@ class WindowConnection:
             bind(self.res,'XResGetClientPid',integer,[ctypes.POINTER(Value)])
             bind(self.res,'XResClientIdsDestroy',None,[ctypes.c_long,ctypes.POINTER(Value)])
             self.errors = False
-            self.handler = ctypes.CFUNCTYPE(integer,ptr,ptr)(lambda *_: self._error())
+            self.failures=[]
+            self.handler = ctypes.CFUNCTYPE(integer,ptr,ptr)(lambda _,error: self._error(error))
             self.previous_handler = self.x.XSetErrorHandler(ctypes.cast(self.handler,ptr))
             self.display=self.x.XOpenDisplay(None)
             require(bool(self.display),'window_identity_unavailable',501)
@@ -448,7 +455,9 @@ class WindowConnection:
         except Exception:
             self.close(); raise
 
-    def _error(self): self.errors=True; return 0
+    def _error(self,error):
+        self.errors=True;value=ctypes.cast(error,ctypes.POINTER(self.XError)).contents
+        self.failures.append((value.code,value.request,value.minor));return 0
     def __enter__(self):
         self.x.XGrabServer(self.display); self.x.XSync(self.display,0); self.grabbed=True; return self
     def __exit__(self,*_): self.close()
@@ -521,7 +530,7 @@ class WindowConnection:
         require(w<=3840 and h<=2160,'window_geometry_unavailable')
         self.client_dimensions=(w,h)
         return {'width':w,'height':h}
-    def pixels(self,crop):
+    def offscreen_pixmap(self):
         # XGetImage(window) has undefined pixels where another window obscures
         # it. Only an existing compositor's verified offscreen pixmap is safe.
         # Never start redirection here: its initial hidden pixels may be stale.
@@ -533,14 +542,79 @@ class WindowConnection:
             composite.XCompositeNameWindowPixmap.argtypes=[ctypes.c_void_p,ctypes.c_ulong]
             major,minor=ctypes.c_int(),ctypes.c_int()
             require(composite.XCompositeQueryVersion(self.display,ctypes.byref(major),ctypes.byref(minor)) and (major.value,minor.value)>=(0,2),'window_capture_unsupported',501)
+            opcode,event,error=ctypes.c_int(),ctypes.c_int(),ctypes.c_int()
+            require(self.x.XQueryExtension(self.display,b'Composite',ctypes.byref(opcode),ctypes.byref(event),ctypes.byref(error))!=0,'window_capture_unsupported',501)
         except (OSError,AttributeError):raise ToolError('window_capture_unsupported',501) from None
-        pixmap=composite.XCompositeNameWindowPixmap(self.display,self.window)
-        self.x.XSync(self.display,0);require(pixmap and not self.errors,'window_capture_unsupported',501)
-        image=None
+        path=[self.window];root=self.x.XDefaultRootWindow(self.display)
+        require(self.window!=root,'window_capture_unsupported',501)
+        for _ in range(8):
+            candidate=path[-1]
+            if candidate==self.window:w,h=self.client_dimensions;border=self.border;offset=(border,border)
+            else:
+                w,h,border=self.drawable_geometry(candidate)
+                self.prove_client_region(path)
+                x,y=self.translate(self.window,candidate);offset=(x+border,y+border)
+            pixmap=self.named_pixmap(composite,opcode.value,candidate,w,h,border)
+            if pixmap is not None:
+                self.capture_offset=offset;return pixmap
+            _,parent,_=self.tree(candidate)
+            require(parent not in [0,root] and parent not in path,'window_capture_unsupported',501)
+            path.append(parent)
+        raise ToolError('window_capture_unsupported',501)
+    def named_pixmap(self, composite, opcode, window, width, height, border):
+        require(not self.errors,'window_identity_changed')
+        start=len(getattr(self,'failures',[]))
+        pixmap=composite.XCompositeNameWindowPixmap(self.display,window)
+        self.x.XSync(self.display,0)
+        if self.errors:
+            # Only an expected unredirected-window BadMatch can advance. Other
+            # errors, including destroyed/reparented resources, are terminal.
+            if getattr(self,'failures',[])[start:]==[(8,opcode,6)]:
+                self.errors=False;return None
+            raise ToolError('window_capture_unsupported',501)
+        require(pixmap,'window_capture_unsupported',501)
         try:
-            w,h,border=self.drawable_geometry(pixmap)
-            require(border==0 and (w,h)==tuple(size+2*self.border for size in self.client_dimensions),'window_capture_unsupported',501)
-            image=self.x.XGetImage(self.display,pixmap,self.border+crop['x'],self.border+crop['y'],crop['width'],crop['height'],ctypes.c_ulong(-1).value,2)
+            w,h,pixmap_border=self.drawable_geometry(pixmap)
+            require(pixmap_border==0 and (w,h)==(width+2*border,height+2*border),'window_capture_unsupported',501)
+            return pixmap
+        except Exception:
+            self.x.XFreePixmap(self.display,pixmap);raise
+    def tree(self,window):
+        root,parent=ctypes.c_ulong(),ctypes.c_ulong();children=ctypes.POINTER(ctypes.c_ulong)();count=ctypes.c_uint()
+        try:
+            require(self.x.XQueryTree(self.display,window,ctypes.byref(root),ctypes.byref(parent),ctypes.byref(children),ctypes.byref(count))!=0,'window_capture_unsupported',501)
+            self.x.XSync(self.display,0)
+            require(not self.errors and root.value==self.x.XDefaultRootWindow(self.display) and count.value<=256,'window_capture_unsupported',501)
+            return root.value,parent.value,[children[i] for i in range(count.value)]
+        finally:
+            if children:self.x.XFree(children)
+    def translate(self,source,target):
+        x,y=ctypes.c_int(),ctypes.c_int();child=ctypes.c_ulong()
+        require(self.x.XTranslateCoordinates(self.display,source,target,0,0,ctypes.byref(x),ctypes.byref(y),ctypes.byref(child))!=0,'window_capture_unsupported',501)
+        self.x.XSync(self.display,0);require(not self.errors,'window_identity_changed')
+        return x.value,y.value
+    def prove_client_region(self,path):
+        width,height=self.client_dimensions
+        for index in range(1,len(path)):
+            child,parent=path[index-1],path[index]
+            _,_,siblings=self.tree(parent)
+            require(child in siblings,'window_identity_changed')
+            x,y=self.translate(self.window,parent);w,h,_=self.drawable_geometry(parent)
+            require(x>=0 and y>=0 and x+width<=w and y+height<=h,'window_capture_unsupported',501)
+            for sibling in siblings:
+                if sibling==child:continue
+                sw,sh,border=self.drawable_geometry(sibling);sx,sy=self.translate(sibling,self.window)
+                # Even an unmapped sibling is conservatively rejected. No
+                # non-path window can contribute pixels inside this crop.
+                require(not (sx-border<width and sx+sw+border>0 and sy-border<height and sy+sh+border>0),'window_capture_unsupported',501)
+    def probe_offscreen(self):
+        self.bounds();pixmap=self.offscreen_pixmap()
+        self.x.XFreePixmap(self.display,pixmap)
+        self.x.XSync(self.display,0);require(not self.errors,'window_capture_unsupported',501)
+    def pixels(self,crop):
+        pixmap=self.offscreen_pixmap();image=None
+        try:
+            image=self.x.XGetImage(self.display,pixmap,self.capture_offset[0]+crop['x'],self.capture_offset[1]+crop['y'],crop['width'],crop['height'],ctypes.c_ulong(-1).value,2)
             self.x.XSync(self.display,0);require(bool(image) and not self.errors,'window_capture_unavailable')
             value=image.contents
             require(value.bits_per_pixel in [16,24,32] and value.byte_order in [0,1] and value.width*value.bits_per_pixel//8<=value.bytes_per_line<=65536 and value.height==crop['height'] and value.width==crop['width'],'window_capture_unsupported',501)
@@ -558,7 +632,37 @@ class WindowConnection:
 
 def window_identity(arguments):
     desktop_env()
-    with WindowConnection(arguments.get('window_id')) as connection:return connection.identity(create_instance=True)
+    with WindowConnection(arguments.get('window_id')) as connection:
+        connection.identity(require_instance=False)
+        connection.probe_offscreen()
+        return connection.identity(create_instance=True)
+
+
+def window_prepare(arguments):
+    # Changing the desktop compositor is an explicit account-authorized setup
+    # action. Capture/identity never silently change the customer's settings.
+    require(arguments.get('allow_compositor') is True,'compositor_consent_required')
+    desktop_env()
+    with WindowConnection(arguments.get('window_id')) as connection:
+        identity=connection.identity(require_instance=False)
+    pids=command(['/usr/bin/pgrep','-u',str(os.getuid()),'-x','xfwm4'],timeout=5).split()
+    require(len(pids)==1 and re.fullmatch(r'[1-9][0-9]{0,9}',pids[0]),'window_compositor_unsupported',501)
+    try:require(os.readlink('/proc/'+pids[0]+'/exe')=='/usr/bin/xfwm4','window_compositor_unsupported',501)
+    except OSError:raise ToolError('window_compositor_unsupported',501) from None
+    setting=['/usr/bin/xfconf-query','-c','xfwm4','-p','/general/use_compositing']
+    current=command(setting,timeout=5).strip()
+    require(current in ['true','false'],'window_compositor_unsupported',501)
+    if current=='false':command(setting+['-s','true'],timeout=5)
+    deadline=time.monotonic()+8
+    while True:
+        try:
+            with WindowConnection(arguments.get('window_id')) as connection:
+                require(connection.identity(require_instance=False)==identity,'window_identity_changed')
+                connection.probe_offscreen()
+            return {'success':True}
+        except ToolError as error:
+            if error.code!='window_capture_unsupported' or time.monotonic()>=deadline:raise
+            time.sleep(0.2)
 
 
 def session_windows():
@@ -1235,7 +1339,7 @@ def dispatch(request):
         elif kind == 'session-manifest': result = sessions(request['tool'], arguments)
         elif kind == 'view-input': result = view_input(arguments)
         elif kind == 'network-tools': result = network(request['tool'], arguments)
-        elif kind == 'computer-tools': result = loopback_http(arguments) if request['tool'] == 'loopback_http' else view_input(arguments) if request['tool'] == 'viewer_input' else window_identity(arguments) if request['tool']=='window_identity' else software(request['tool'], arguments)
+        elif kind == 'computer-tools': result = loopback_http(arguments) if request['tool'] == 'loopback_http' else view_input(arguments) if request['tool'] == 'viewer_input' else window_identity(arguments) if request['tool']=='window_identity' else window_prepare(arguments) if request['tool']=='window_prepare' else software(request['tool'], arguments)
         else: raise ToolError('unsupported_computer_tool', 501)
         return {'ok': True, 'result': result}
     except ToolError as error: return {'ok': False, 'status': error.status, 'code': error.code}

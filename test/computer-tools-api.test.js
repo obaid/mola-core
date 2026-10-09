@@ -25,11 +25,16 @@ test('a boot change during capture discards pixels and returns a generation erro
   api.guestTools.run = async () => { record.boot_id = 'other-boot'; return { image_base64: 'must-not-return' }; };
   await assert.rejects(api.handle(request, ['machines', 'computer', 'capture'], { expected_generation: 2, mode: 'desktop' }), error => error.code === 'tool_boot_changed');
 });
-test('private window identity requires the current generation before querying any guest window', async () => {
+test('private window identity and compositor setup require the current generation before touching the guest', async () => {
   const {api,calls}=fixture();
-  await assert.rejects(api.handle(request,['machines','computer','computer-tools'],{tool:'window_identity',arguments:{window_id:'0x1'}}),error=>error.status===409);
-  await assert.rejects(api.handle(request,['machines','computer','computer-tools'],{tool:'window_identity',arguments:{window_id:'0x1',expected_generation:1}}),error=>error.status===409);
+  for (const tool of ['window_identity','window_prepare']) {
+    await assert.rejects(api.handle(request,['machines','computer','computer-tools'],{tool,arguments:{window_id:'0x1',allow_compositor:true}}),error=>error.status===409);
+    await assert.rejects(api.handle(request,['machines','computer','computer-tools'],{tool,arguments:{window_id:'0x1',allow_compositor:true,expected_generation:1}}),error=>error.status===409);
+  }
   assert.equal(calls.length,0);
+  await api.handle(request,['machines','computer','computer-tools'],{tool:'window_prepare',arguments:{window_id:'0x1',allow_compositor:true,expected_generation:2}});
+  assert.equal(calls.length,1);
+  assert.deepEqual(calls[0].at(-1),{generation:2,boot_id:'boot'});
 });
 test('unqualified running checkpoint reports capability failure without disk mutation', async () => {
   const { api, calls, record } = fixture();

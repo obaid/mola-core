@@ -11,7 +11,7 @@ export const COMPUTER_TOOLS = {
   browser: new Set(['browser_prepare', 'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_fill', 'browser_key', 'browser_evaluate', 'browser_screenshot', 'browser_tabs', 'browser_capabilities']),
   apps: new Set(['app_install', 'app_status', 'app_launch', 'app_list']),
   'session-manifest': new Set(['session_save', 'session_restore', 'session_state', 'session_autosave']),
-  'computer-tools': new Set(['loopback_http', 'viewer_input', 'window_identity', 'software_state', 'software_pin', 'software_stage', 'software_activate', 'software_rollback']),
+  'computer-tools': new Set(['loopback_http', 'viewer_input', 'window_identity', 'window_prepare', 'software_state', 'software_pin', 'software_stage', 'software_activate', 'software_rollback']),
   'network-tools': new Set(['network_configure', 'network_status', 'network_teardown']),
 };
 
