@@ -16,6 +16,17 @@ REMOVE = [
     '/etc/ssh/ssh_host_ecdsa_key', '/etc/ssh/ssh_host_ecdsa_key.pub',
     '/etc/ssh/ssh_host_ed25519_key', '/etc/ssh/ssh_host_ed25519_key.pub',
     '/etc/ssh/ssh_host_rsa_key', '/etc/ssh/ssh_host_rsa_key.pub',
+    # The guest entrypoint restores /etc/ssh from this persistent platform
+    # key store on every boot. Clear both stores on a fork so the entrypoint
+    # generates fresh host identities; customer ~/.ssh credentials remain.
+    '/home/dev/.mola/ssh/ssh_host_dsa_key', '/home/dev/.mola/ssh/ssh_host_dsa_key.pub',
+    '/home/dev/.mola/ssh/ssh_host_ecdsa_key', '/home/dev/.mola/ssh/ssh_host_ecdsa_key.pub',
+    '/home/dev/.mola/ssh/ssh_host_ed25519_key', '/home/dev/.mola/ssh/ssh_host_ed25519_key.pub',
+    '/home/dev/.mola/ssh/ssh_host_rsa_key', '/home/dev/.mola/ssh/ssh_host_rsa_key.pub',
+    '/home/dev/.hyperwake/ssh/ssh_host_dsa_key', '/home/dev/.hyperwake/ssh/ssh_host_dsa_key.pub',
+    '/home/dev/.hyperwake/ssh/ssh_host_ecdsa_key', '/home/dev/.hyperwake/ssh/ssh_host_ecdsa_key.pub',
+    '/home/dev/.hyperwake/ssh/ssh_host_ed25519_key', '/home/dev/.hyperwake/ssh/ssh_host_ed25519_key.pub',
+    '/home/dev/.hyperwake/ssh/ssh_host_rsa_key', '/home/dev/.hyperwake/ssh/ssh_host_rsa_key.pub',
     '/var/lib/dbus/machine-id',
     '/var/lib/mola/machine-token', '/var/lib/mola/machine-id',
     '/var/lib/mola/computer-id', '/var/lib/mola/enrollment-key',

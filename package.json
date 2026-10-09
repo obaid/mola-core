@@ -1,6 +1,6 @@
 {
   "name": "mola-core",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "description": "Run persistent Linux desktops with Omarchy or Ubuntu and drive them over a REST API.",
   "homepage": "https://mola.sh",
   "license": "FSL-1.1-ALv2",

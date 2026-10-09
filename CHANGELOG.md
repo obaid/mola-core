@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.2 — 2026-10-09
+
+- Reset the guest entrypoint's persistent SSH host-key stores when creating a computer from a snapshot. Forks receive fresh SSH host identities while customer SSH credentials and normal stop/Wake identities remain intact.
+
 ## 1.9.1 — 2026-10-09
 
 - Accept Cloud generation-bound display changes and save confirmed dimensions

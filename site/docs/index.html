@@ -134,7 +134,7 @@ curl -s -X POST $API/machines \
   </section>
 <section id="storage">
     <h2>Hosted storage and recovery</h2>
-    <p>Mola Core 1.9.1 gives an authenticated control plane durable storage receipts. Snapshot, restore, import, seal, delete and fence operations keep their operation ID and generation across lost responses and restarts. Long operations return HTTP 202 while pending; clients reconcile the same receipt before sending another mutation.</p>
+    <p>Mola Core 1.9.2 gives an authenticated control plane durable storage receipts. Snapshot, restore, import, seal, delete and fence operations keep their operation ID and generation across lost responses and restarts. Long operations return HTTP 202 while pending; clients reconcile the same receipt before sending another mutation.</p>
     <p>Restore verifies checksums and prepares a temporary disk before atomic replacement. Pending work keeps the disk fenced. A timeout does not prove the guest is stopped or make its capacity available.</p>
     <p>Stopped resize preserves the persistent disk and grows its ext4 filesystem. Restoring an older, smaller snapshot retains the computer's larger allocation: Mola verifies and grows unpublished restore staging before replacing the disk. Disks cannot shrink.</p>
     <p>Running-disk checkpoints require a qualified image and explicit host and control-plane enablement. They quiesce disk writes and retain durable operation receipts; they do not capture process memory. Check capabilities before requesting a checkpoint.</p>
