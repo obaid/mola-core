@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.1 — 2026-10-09
+
+- Accept Cloud generation-bound display changes and save confirmed dimensions
+  for Wake. Validate dimensions before changing the guest display so invalid
+  requests cannot resize a desktop and then fail during persistence.
+
 ## 1.9.0 — 2026-10-08
 
 - Add private durable exec jobs with caller-stable receipts and 1–900 second

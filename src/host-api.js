@@ -137,13 +137,17 @@ export class HostApi {
         if (suppliedGeneration !== undefined && (!Number.isSafeInteger(expectedGeneration) || expectedGeneration !== record.cloud.generation)) fail(409, 'Tool belongs to a previous generation.', 'computer_generation_mismatch');
         if (parts[2] === 'vault-inject' && suppliedGeneration !== undefined && (!Number.isSafeInteger(expectedGeneration) || expectedGeneration !== record.cloud.generation)) fail(409, 'Vault injection belongs to a previous generation.', 'vault_generation_mismatch');
         if (parts[2] === 'network-probe' && body.arguments?.expected_boot_id !== record.boot_id) fail(409, 'Network probe belongs to a previous boot.', 'network_probe_boot_mismatch');
+        let display;
+        if (parts[2] === 'geometry' && (body.width !== undefined || body.height !== undefined)) {
+          const { expected_generation, ...dimensions } = body;
+          try { display = validateDisplay(dimensions); } catch { fail(400, 'Invalid display dimensions.'); }
+        }
         const target = await this.runtime.describe(record.id);
         if (!hostDescription(record, target).ready) fail(409, 'Machine is not ready.');
         const binding = { generation: record.cloud.generation, boot_id: record.boot_id };
         const data = await this.guestTools.run(record.id, target, parts[2], body, binding);
         if (record.cloud.generation !== binding.generation || record.boot_id !== binding.boot_id || record.cloud.deleted) fail(409, 'Computer boot changed during tool execution.', 'tool_boot_changed');
-        if (parts[2] === 'geometry' && (body.width !== undefined || body.height !== undefined)) {
-          let display; try { display = validateDisplay(body); } catch { fail(400, 'Invalid display dimensions.'); }
+        if (display) {
           if (data.width !== display.width || data.height !== display.height) fail(502, 'Guest display change was not confirmed.');
           record.display = display; record.cloud.create_spec.display = display; this.registry.flush();
         }
