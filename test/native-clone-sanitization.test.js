@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-test('clone staging removes managed proxy authentication and service persistence', () => {
+test('clone staging resets persistent SSH host identity and managed proxy persistence', () => {
   const fixture = fileURLToPath(new URL('./native-clone-sanitization-fixture.py', import.meta.url));
   const module = fileURLToPath(new URL('../runtime/native/sanitize_clone.py', import.meta.url));
   const result = spawnSync('python3', [fixture, module], { encoding: 'utf8', timeout: 10000 });
