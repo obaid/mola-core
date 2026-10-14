@@ -3,86 +3,130 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mola</title>
-<meta name="description" content="Instant computers powered by Omarchy that your AI agents can see, control, and operate. A full Linux desktop on your own machine, driven through an API.">
+<meta name="color-scheme" content="dark">
+<title>Mola | Cloud computers for you and your agents</title>
+<meta name="description" content="Mola Cloud gives you and your agents persistent Linux computers for browsers, apps, and real work. Try one free for 20 minutes, or self-host Mola on your own hardware.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23111c18'/><rect x='3' y='4' width='10' height='8' fill='%239ece6a'/></svg>">
 <link rel="canonical" href="https://mola.sh/">
-
-<!-- Social cards. og:image must be absolute: Slack, X and LinkedIn fetch it
-     from their own servers, where a root-relative path resolves to nothing. -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Mola">
 <meta property="og:url" content="https://mola.sh/">
-<meta property="og:title" content="Mola">
-<meta property="og:description" content="Instant computers your AI agents can see, control, and operate. A full Omarchy desktop on your own machine, driven through an API.">
-<meta property="og:image" content="https://mola.sh/og.png">
-<meta property="og:image:type" content="image/png">
+<meta property="og:title" content="Mola Cloud | A computer for you and your agents">
+<meta property="og:description" content="Persistent Linux desktops, hosted for you. Run browsers, apps, and agents. Try one computer free for 20 minutes.">
+<meta property="og:image" content="https://mola.sh/og-cloud.jpg">
+<meta property="og:image:type" content="image/jpeg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The word MOLA in green pixel blocks on a dark ground, above the line "npx mola-core".">
+<meta property="og:image:alt" content="Mola Cloud. Cloud computers for you and your agents, in Mola's green pixel identity.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:creator" content="@obaid">
-<meta name="twitter:title" content="Mola">
-<meta name="twitter:description" content="Instant computers your AI agents can see, control, and operate. A full Omarchy desktop on your own machine, driven through an API.">
-<meta name="twitter:image" content="https://mola.sh/og.png">
-<meta name="twitter:image:alt" content="The word MOLA in green pixel blocks on a dark ground, above the line "npx mola-core".">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap">
+<meta name="twitter:title" content="Mola Cloud | A computer for you and your agents">
+<meta name="twitter:description" content="Persistent Linux desktops, hosted for you. Run browsers, apps, and agents. Try one computer free for 20 minutes.">
+<meta name="twitter:image" content="https://mola.sh/og-cloud.jpg">
+<meta name="twitter:image:alt" content="Mola Cloud. Cloud computers for you and your agents, in Mola's green pixel identity.">
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/cloud.css">
 </head>
-<body>
-
-<aside class="announcement" aria-label="Mola Cloud availability">
-  <div class="wrap">
-    <p><strong>Mola Cloud is live now.</strong> Run cloud computers powered by Omarchy via API.</p>
-    <a href="https://cloud.mola.sh">Open Mola Cloud <span aria-hidden="true">→</span></a>
-  </div>
-</aside>
+<body class="cloud-home">
+<a class="skip-link" href="#main">Skip to content</a>
 <div class="bar">
   <div class="wrap">
-    <span class="mark">mola<b>.</b></span>
-    <nav>
-      <a href="/docs/">Docs</a>
-      <a href="https://github.com/obaid/mola-core">GitHub</a>
+    <a class="mark" href="/" aria-label="Mola home">mola<b>.</b></a>
+    <nav aria-label="Main navigation">
+      <a href="https://cloud.mola.sh/docs">Docs</a>
+      <a href="#open-source">Open source</a>
+      <a class="nav-github" href="https://github.com/obaid/mola-core">GitHub</a>
+      <a class="nav-login" href="https://cloud.mola.sh/login">Log in <span aria-hidden="true">↗</span></a>
     </nav>
   </div>
 </div>
-<div class="wrap">
-
+<main id="main" class="wrap">
   <header class="hero">
     <canvas id="pixelfield" aria-hidden="true"></canvas>
-    <h1 class="wordmark"><canvas id="wordmark" role="img" aria-label="mola"></canvas></h1>
-    <p class="pitch">Instant computers powered by Omarchy that your AI agents can see, control, and operate.</p>
-    <p class="sub">A full Linux desktop, driven entirely through an API. Each machine runs a full Omarchy desktop in its own virtual machine, on hardware you already own. Creating one takes about a second. It accepts commands about seven seconds later.</p>
-
+    <h1 class="wordmark" aria-label="Mola Cloud">
+      <canvas id="wordmark" aria-hidden="true"></canvas>
+      <span class="cloud-name">Cloud</span>
+    </h1>
+    <p class="pitch">Cloud computers for you<br class="desktop-break"> and your agents.</p>
+    <p class="sub">Persistent Linux desktops for browsers, apps, and agents. Open the desktop or drive it through the API.</p>
     <div class="cta">
-      <a class="btn" href="/docs/">Read the docs</a>
-      <a class="btn ghost" href="https://cloud.mola.sh">Use Mola Cloud</a>
-    </div>
-
-    <div class="term">
-      <div class="chrome"><i></i><i></i><i></i><span>~</span></div>
-<pre><span class="p">$</span> npx mola-core
-
-  <span class="d">fetching guest image omarchy-4.0.1-aarch64</span>
-  <span class="d">guest image ready</span>
-
-  <span class="g">API</span>    http://127.0.0.1:4141/v1
-  <span class="g">Token</span>  7_NmOSph4PWtcZP5QpVW4rJJ-9VIlIx3
-
-<span class="p">$</span> <span class="cursor"></span></pre>
+      <a class="btn" href="https://cloud.mola.sh/register">Try Mola Cloud <span aria-hidden="true">↗</span></a>
+      <a class="hero-docs" href="https://cloud.mola.sh/docs/quickstart">Read the quickstart <span aria-hidden="true">→</span></a>
     </div>
   </header>
 
+  <aside class="trial-note" aria-label="Cloud trial and invitation access">
+    <p><strong>One computer. 20 minutes. On us.</strong></p>
+    <p>Sign up for the waitlist. Your trial starts when you create a computer. We’ll email your invite code once approved.</p>
+  </aside>
 
-  <div class="lead-in">
-    <p>Everything it can do, and how to drive it, is in <a href="/docs/">the documentation</a>.</p>
-  </div>
+  <section class="workspace-section" aria-labelledby="workspace-heading">
+    <div class="section-intro">
+      <h2 id="workspace-heading">Start a task. Keep the computer.</h2>
+      <p>Your browser, apps, files, and saved logins stay together. Use the desktop yourself, or let your agent drive.</p>
+    </div>
+    <figure class="workspace-image">
+      <img src="/assets/cloud-workspace.jpg" width="1146" height="720" loading="lazy" decoding="async" alt="An example Mola Cloud workspace with a persistent computer, its disk, and controls to create or wake a computer.">
+      <figcaption>A real Mola Cloud workspace. Stop a computer to release compute; its disk stays for the next session.</figcaption>
+    </figure>
+    <div class="capabilities">
+      <div>
+        <h3>A browser, a terminal, a whole desktop.</h3>
+        <p>Install apps, run your project, test a browser flow, and collect the results. Open the desktop whenever you want to take over.</p>
+        <a href="https://cloud.mola.sh/docs/browser-tools">Explore browser and app tools <span aria-hidden="true">→</span></a>
+      </div>
+      <div>
+        <h3>Your setup, ready for the next task.</h3>
+        <p>Keep dependencies, files, and browser sessions on the same computer. Stop when you’re done, then wake it to continue.</p>
+        <a href="https://cloud.mola.sh/docs">Explore Mola Cloud <span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="agent-section" aria-labelledby="agent-heading">
+    <div>
+      <h2 id="agent-heading">Give your agent a place to work.</h2>
+      <p>Keep using Codex, Claude Code, or your own agent. Connect through MCP or REST and give it a persistent computer.</p>
+      <div class="text-links">
+        <a href="https://cloud.mola.sh/docs/mcp">Connect with MCP <span aria-hidden="true">→</span></a>
+        <a href="https://cloud.mola.sh/docs/quickstart">Use the Cloud API <span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+    <div class="api-example">
+      <p class="code-label">Create a Cloud computer</p>
+      <pre aria-label="Example Cloud API request"><code><span class="g">curl</span> https://cloud.mola.sh/api/v1/computers \
+  -H "Authorization: Bearer $MOLA_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"research","image":"ubuntu"}'</code></pre>
+      <p class="code-note">Create an API token in your Cloud account to get started.</p>
+    </div>
+  </section>
+
+  <section id="open-source" class="source-section" aria-labelledby="source-heading">
+    <div>
+      <h2 id="source-heading">Mola, on your own hardware.</h2>
+      <p>Prefer to run it yourself? The Mola runtime is available on GitHub. Start a Linux desktop locally and drive it over an API.</p>
+      <div class="text-links">
+        <a href="/docs/">Self-hosting docs <span aria-hidden="true">→</span></a>
+        <a href="https://github.com/obaid/mola-core">View source on GitHub <span aria-hidden="true">↗</span></a>
+      </div>
+    </div>
+    <div class="install-example">
+      <p class="code-label">Run Mola locally</p>
+      <div class="install-command">
+        <code>npx mola-core</code>
+        <button type="button" id="copy-install" aria-label="Copy the local install command">Copy</button>
+      </div>
+      <p class="code-note" id="copy-status" role="status">Your hardware. Your machines.</p>
+    </div>
+  </section>
+</main>
+<div class="wrap">
   <footer>
-    <p><a href="https://github.com/obaid/mola-core">Source</a> · <a href="https://www.npmjs.com/package/mola-core">npm</a> · <a href="https://github.com/obaid/mola-core/blob/main/LICENSE.md">FSL-1.1-ALv2</a></p>
+    <p><a href="https://cloud.mola.sh">Mola Cloud</a> · <a href="https://github.com/obaid/mola-core">Source</a> · <a href="https://www.npmjs.com/package/mola-core">npm</a> · <a href="https://github.com/obaid/mola-core/blob/main/LICENSE.md">FSL-1.1-ALv2</a></p>
     <p>A project by <a href="https://x.com/obaid" rel="me">Obaid Ahmed</a></p>
     <p class="fine">Omarchy and the bundled dependencies keep their own licences. Mola is independent, and is not affiliated with or endorsed by <a href="https://omarchy.org" target="_blank" rel="noopener noreferrer">Omarchy</a>, <a href="https://dhh.dk" target="_blank" rel="noopener noreferrer">DHH</a>, <a href="https://37signals.com" target="_blank" rel="noopener noreferrer">37signals</a>, <a href="https://basecamp.com" target="_blank" rel="noopener noreferrer">Basecamp</a>, or the <a href="https://omarchy.org/foundation/" target="_blank" rel="noopener noreferrer">Omacom Foundation</a>.</p>
   </footer>
-
 </div>
 
 <script>
@@ -206,6 +250,18 @@
       resizeTimer = setTimeout(() => { layout(); paint(performance.now()); }, 150);
     });
   }
+
+  const copyButton = document.getElementById('copy-install');
+  const copyStatus = document.getElementById('copy-status');
+  copyButton.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText('npx mola-core');
+      copyButton.textContent = 'Copied';
+      copyStatus.textContent = 'Copied. Paste it into your terminal.';
+    } catch {
+      copyStatus.textContent = 'Select and copy the command above.';
+    }
+  });
 
   drawWordmark();
   startField();
