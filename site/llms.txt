@@ -1,5 +1,20 @@
 # Mola
 
+Mola Cloud provides hosted, persistent Linux computers for people and AI agents.
+Create an account at https://cloud.mola.sh/register. New accounts can try one
+computer for a fixed 20 minutes beginning when it is created. Regular access
+requires approval from the waitlist and redemption of the account's emailed
+invite code. Existing account access is preserved.
+
+Cloud API: https://cloud.mola.sh/api/v1
+Cloud documentation: https://cloud.mola.sh/docs
+Cloud MCP: https://cloud.mola.sh/docs/mcp
+
+For self-hosting, use the Mola runtime at https://github.com/obaid/mola-core.
+The reference below describes that local runtime and its separate `/v1` API.
+
+## Self-hosted runtime reference
+
 > Persistent Linux computers for AI agents. The default image runs Omarchy, the Arch Linux desktop, in its own virtual machine on the user's hardware; Linux x86_64 KVM hosts also support an operator-installed Ubuntu 24.04 XFCE image. About one second to create, about seven to become usable. Drive it over REST, MCP, or a persistent low-latency action session.
 
 This file is written for an agent deciding whether to use Mola and then using it.

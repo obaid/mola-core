@@ -1,0 +1,203 @@
+/* Cloud-first evolution of the existing Mola identity.
+   DESIGN_VARIANCE: 4 / MOTION_INTENSITY: 2 / VISUAL_DENSITY: 3.
+   Preserve the wordmark, dark palette and slow pixel motion; simplify the path to Cloud. */
+html { scroll-behavior: auto; }
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/assets/jetbrains-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/assets/jetbrains-mono-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/assets/jetbrains-mono-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/assets/jetbrains-mono-800.woff2') format('woff2');
+}
+
+.cloud-home .skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 30;
+  padding: 0.6rem 1rem;
+  color: var(--void);
+  background: var(--green);
+  transform: translateY(-160%);
+}
+.cloud-home .skip-link:focus { transform: translateY(0); }
+.cloud-home .bar .wrap { height: 64px; }
+.cloud-home .bar nav { align-items: center; gap: 1.5rem; }
+.cloud-home .bar .nav-login { color: var(--green); }
+.cloud-home .hero { padding: 4.75rem 0 4rem; }
+.cloud-home .wordmark {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1.5rem;
+  filter: none;
+}
+.cloud-home #wordmark { width: min(70%, 30rem); }
+.cloud-name {
+  padding-bottom: 0.15rem;
+  color: var(--green);
+  font-size: clamp(1.35rem, 4vw, 2.5rem);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.06em;
+}
+.cloud-home .pitch {
+  margin-top: 2.1rem;
+  font-size: clamp(1.6rem, 4vw, 2.5rem);
+  line-height: 1.25;
+  letter-spacing: -0.05em;
+  max-width: 31ch;
+}
+.cloud-home .sub { max-width: 55ch; margin-top: 1.35rem; }
+.cloud-home .cta { align-items: center; gap: 1.75rem; }
+.cloud-home .btn {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.cloud-home .hero-docs { font-size: 0.85rem; }
+.trial-note {
+  display: grid;
+  grid-template-columns: 1fr 1.8fr;
+  align-items: center;
+  gap: 2rem;
+  padding: 1.6rem 0;
+  border-top: 1px solid var(--edge-lit);
+  border-bottom: 1px solid var(--edge-lit);
+}
+.trial-note p { margin: 0; color: var(--muted); font-size: 0.8rem; }
+.trial-note strong { color: var(--green-hi); font-size: 0.88rem; }
+.cloud-home section { padding-top: 4.5rem; }
+.cloud-home h2 { max-width: 30ch; font-size: clamp(1.35rem, 2.9vw, 1.75rem); line-height: 1.4; }
+.cloud-home h2::before { content: none; }
+.section-intro { max-width: 660px; }
+.section-intro p { max-width: 62ch; color: var(--muted); font-size: 0.9rem; }
+.workspace-image { margin: 2rem 0 0; }
+.workspace-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--edge-lit);
+  border-radius: 3px;
+  background: var(--void);
+}
+.workspace-image figcaption { margin-top: 0.75rem; color: var(--muted); font-size: 0.7rem; }
+.capabilities {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 3rem;
+  margin-top: 2.5rem;
+}
+.capabilities h3 { margin-top: 0; font-size: 0.9rem; }
+.capabilities p { color: var(--muted); font-size: 0.85rem; }
+.capabilities a { display: inline-block; margin-top: 1rem; font-size: 0.8rem; }
+.cloud-home .agent-section,
+.cloud-home .source-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: 3rem;
+  margin-top: 4.5rem;
+  padding-top: 3rem;
+  border-top: 1px solid var(--edge);
+}
+.agent-section > div > p,
+.source-section > div > p { color: var(--muted); font-size: 0.85rem; }
+.text-links { display: flex; flex-wrap: wrap; gap: 0.8rem 1.5rem; margin-top: 1.4rem; font-size: 0.8rem; }
+.api-example, .install-example { min-width: 0; }
+.cloud-home p.code-label {
+  margin-top: 0;
+  font-size: 0.68rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.cloud-home .api-example pre {
+  margin-top: 0.6rem;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 1.2rem;
+  font-size: 0.72rem;
+  line-height: 1.9;
+}
+.cloud-home p.code-note { margin-top: 0.75rem; color: var(--muted); font-size: 0.7rem; }
+.install-command {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.6rem;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  background: var(--void);
+}
+.install-command code { padding: 0; color: var(--green-hi); background: none; font-size: 0.95rem; }
+.install-command button {
+  min-width: 70px;
+  min-height: 42px;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--edge-lit);
+  border-radius: 3px;
+  color: var(--green);
+  background: var(--raise);
+  font: 500 0.75rem var(--mono);
+  cursor: pointer;
+}
+.install-command button:hover { border-color: var(--green); }
+.install-command button:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.cloud-home footer { margin-top: 4.5rem; padding-bottom: 3rem; }
+
+@media (max-width: 760px) {
+  .cloud-home .hero { padding-top: 3.5rem; padding-bottom: 3rem; }
+  .cloud-home .wordmark { gap: 1rem; }
+  .cloud-home .pitch { max-width: 24ch; }
+  .cloud-home .sub { max-width: 43ch; }
+  .trial-note { grid-template-columns: 1fr; gap: 0.5rem; padding: 1.4rem 0; }
+  .cloud-home section { padding-top: 3rem; }
+  .capabilities { gap: 1.75rem; }
+  .cloud-home .agent-section,
+  .cloud-home .source-section { grid-template-columns: minmax(0, 1fr); gap: 1.75rem; margin-top: 3rem; padding-top: 2.5rem; }
+}
+@media (max-width: 540px) {
+  .cloud-home .wrap { padding-right: 1.2rem; padding-left: 1.2rem; }
+  .cloud-home .bar .wrap { gap: 0.75rem; height: 60px; }
+  .cloud-home .bar nav { gap: 0.9rem; font-size: 0.68rem; }
+  .cloud-home .nav-github { display: none; }
+  .cloud-home .hero { padding-top: 3rem; }
+  .cloud-home .pitch { margin-top: 1.75rem; font-size: 1.65rem; }
+  .cloud-home .sub { font-size: 0.84rem; }
+  .cloud-home .cta { gap: 1.2rem; }
+  .cloud-home .hero-docs { font-size: 0.75rem; }
+  .capabilities { grid-template-columns: 1fr; }
+  .workspace-image figcaption { font-size: 0.65rem; }
+  .install-command { padding: 0.85rem; }
+  .install-command code { font-size: 0.86rem; }
+  .cloud-home footer { margin-top: 3rem; }
+}
