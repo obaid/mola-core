@@ -1,18 +1,29 @@
+<!--
+Updated: November 9, 2026
+Changes: New positioning for Mola landing page emphasizing differentiation from ephemeral sandboxes
+- Hero section: "Persistent computers for always-on agents" positioning
+- Emphasized: persistent disks, credential vault, signed-in sessions that survive restarts
+- Updated meta tags with new positioning language
+- Section headers rewritten to contrast with ephemeral sandboxes
+- Features highlighted: credential vault, live desktop view, works with Claude Code/Codex/OpenClaw
+- Maintained existing design system, visual elements, and code examples
+- Updated for agent builders running long-lived agents, coding agent fleets, and always-on assistants
+-->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Mola | Cloud computers for you and your agents</title>
-<meta name="description" content="Mola Cloud gives you and your agents persistent Linux computers for browsers, apps, and real work. Try one free for 20 minutes, or self-host Mola on your own hardware.">
+<title>Mola | Persistent computers for always-on agents</title>
+<meta name="description" content="Persistent Linux desktops for AI agents that stay running. Your agent's logins, files, and setup survive restarts. Works with Claude Code, Codex, OpenClaw. Self-host or use Mola Cloud.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23111c18'/><rect x='3' y='4' width='10' height='8' fill='%239ece6a'/></svg>">
 <link rel="canonical" href="https://mola.sh/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Mola">
 <meta property="og:url" content="https://mola.sh/">
-<meta property="og:title" content="Mola Cloud | A computer for you and your agents">
-<meta property="og:description" content="Persistent Linux desktops, hosted for you. Run browsers, apps, and agents. Try one computer free for 20 minutes.">
+<meta property="og:title" content="Mola | Persistent computers for always-on agents">
+<meta property="og:description" content="Persistent Linux desktops for AI agents. Your agent's logins, files, and setup survive restarts. Works with Claude Code, Codex, OpenClaw.">
 <meta property="og:image" content="https://mola.sh/og-cloud.jpg">
 <meta property="og:image:type" content="image/jpeg">
 <meta property="og:image:width" content="1200">
@@ -20,8 +31,8 @@
 <meta property="og:image:alt" content="Mola Cloud. Cloud computers for you and your agents, in Mola's green pixel identity.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:creator" content="@obaid">
-<meta name="twitter:title" content="Mola Cloud | A computer for you and your agents">
-<meta name="twitter:description" content="Persistent Linux desktops, hosted for you. Run browsers, apps, and agents. Try one computer free for 20 minutes.">
+<meta name="twitter:title" content="Mola | Persistent computers for always-on agents">
+<meta name="twitter:description" content="Persistent Linux desktops for AI agents. Your agent's logins, files, and setup survive restarts. Works with Claude Code, Codex, OpenClaw.">
 <meta name="twitter:image" content="https://mola.sh/og-cloud.jpg">
 <meta name="twitter:image:alt" content="Mola Cloud. Cloud computers for you and your agents, in Mola's green pixel identity.">
 <link rel="stylesheet" href="/style.css">
@@ -47,8 +58,8 @@
       <canvas id="wordmark" aria-hidden="true"></canvas>
       <span class="cloud-name">Cloud</span>
     </h1>
-    <p class="pitch">Cloud computers for you<br class="desktop-break"> and your agents.</p>
-    <p class="sub">Persistent Linux desktops for browsers, apps, and agents. Open the desktop or drive it through the API.</p>
+    <p class="pitch">Persistent computers<br class="desktop-break"> for always-on agents.</p>
+    <p class="sub">Full Linux desktops (Ubuntu or Omarchy) that AI agents drive over a REST API. Permanent disks, credential vault, signed-in sessions that survive restarts. Self-host or use Mola Cloud.</p>
     <div class="cta">
       <a class="btn" href="https://cloud.mola.sh/register">Try Mola Cloud <span aria-hidden="true">↗</span></a>
       <a class="hero-docs" href="https://cloud.mola.sh/docs/quickstart">Read the quickstart <span aria-hidden="true">→</span></a>
@@ -62,8 +73,8 @@
 
   <section class="workspace-section" aria-labelledby="workspace-heading">
     <div class="section-intro">
-      <h2 id="workspace-heading">Start a task. Keep the computer.</h2>
-      <p>Your browser, apps, files, and saved logins stay together. Use the desktop yourself, or let your agent drive.</p>
+      <h2 id="workspace-heading">Not an ephemeral sandbox. A real computer that stays.</h2>
+      <p>Unlike ephemeral sandboxes that start fresh every time, Mola gives your agent a persistent computer. Files, installed apps, browser sessions, and saved logins survive restarts. Stop to release compute, then wake it up right where you left off.</p>
     </div>
     <figure class="workspace-image">
       <img src="/assets/cloud-workspace.jpg" width="1146" height="720" loading="lazy" decoding="async" alt="An example Mola Cloud workspace with a persistent computer, its disk, and controls to create or wake a computer.">
@@ -71,13 +82,13 @@
     </figure>
     <div class="capabilities">
       <div>
-        <h3>A browser, a terminal, a whole desktop.</h3>
-        <p>Install apps, run your project, test a browser flow, and collect the results. Open the desktop whenever you want to take over.</p>
-        <a href="https://cloud.mola.sh/docs/browser-tools">Explore browser and app tools <span aria-hidden="true">→</span></a>
+        <h3>Credential vault for saved logins.</h3>
+        <p>Your agent fills in passwords without seeing them. Logins stay saved across sessions. No need to reconfigure credentials every time your agent starts.</p>
+        <a href="https://cloud.mola.sh/docs/vault">Learn about the vault <span aria-hidden="true">→</span></a>
       </div>
       <div>
-        <h3>Your setup, ready for the next task.</h3>
-        <p>Keep dependencies, files, and browser sessions on the same computer. Stop when you’re done, then wake it to continue.</p>
+        <h3>Live view of the desktop.</h3>
+        <p>Watch what your agent is doing in real-time. Open the desktop to take over, debug, or hand it back to the agent. Embed views for monitoring agent fleets.</p>
         <a href="https://cloud.mola.sh/docs">Explore Mola Cloud <span aria-hidden="true">→</span></a>
       </div>
     </div>
@@ -85,8 +96,8 @@
 
   <section class="agent-section" aria-labelledby="agent-heading">
     <div>
-      <h2 id="agent-heading">Give your agent a place to work.</h2>
-      <p>Keep using Codex, Claude Code, or your own agent. Connect through MCP or REST and give it a persistent computer.</p>
+      <h2 id="agent-heading">Works with Claude Code, Codex, and OpenClaw-style agents.</h2>
+      <p>Connect through MCP or REST API. Give your agent a persistent desktop instead of starting fresh every time. Built for coding agents, long-running assistants, and agent fleets that need continuity.</p>
       <div class="text-links">
         <a href="https://cloud.mola.sh/docs/mcp">Connect with MCP <span aria-hidden="true">→</span></a>
         <a href="https://cloud.mola.sh/docs/quickstart">Use the Cloud API <span aria-hidden="true">→</span></a>
@@ -104,8 +115,8 @@
 
   <section id="open-source" class="source-section" aria-labelledby="source-heading">
     <div>
-      <h2 id="source-heading">Mola, on your own hardware.</h2>
-      <p>Prefer to run it yourself? The Mola runtime is available on GitHub. Start a Linux desktop locally and drive it over an API.</p>
+      <h2 id="source-heading">Open-source core. Self-host on your hardware.</h2>
+      <p>The Mola runtime is open source (FSL-1.1-ALv2). Run persistent Linux desktops on your own infrastructure. No vendor lock-in.</p>
       <div class="text-links">
         <a href="/docs/">Self-hosting docs <span aria-hidden="true">→</span></a>
         <a href="https://github.com/obaid/mola-core">View source on GitHub <span aria-hidden="true">↗</span></a>
