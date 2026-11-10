@@ -38,3 +38,9 @@ On Linux x86_64, `npx mola-core` downloads the default Omarchy image which is aa
 - Test that aarch64 host rejects x86_64 manifest  
 - Test that matching architectures succeed
 - Test that manifests without architecture field still work (backward compatibility)
+
+### Result
+- **Pull Request**: [#44](https://github.com/obaid/mola-core/pull/44)
+- **Branch**: `cursor/fix-arch-mismatch-d789`
+- **Status**: Ready for review
+- All tests passing (5/5 new tests + existing image tests)
