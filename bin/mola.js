@@ -5,6 +5,17 @@ import { stateDir } from '../src/paths.js';
 import { ensurePython } from '../src/python.js';
 import { downloadImage, imageStatus, manifestUrl } from '../src/image.js';
 
+/**
+ * Normalize Node's os.arch() to the QEMU/manifest architecture names.
+ * darwin is always aarch64 (Apple Silicon), linux x64 becomes x86_64.
+ */
+function normalizeArchitecture(platform, arch) {
+  if (platform === 'darwin') return 'aarch64';
+  if (arch === 'x64') return 'x86_64';
+  if (arch === 'arm64') return 'aarch64';
+  return arch;
+}
+
 const command = process.argv[2] ?? 'start';
 const port = Number(
   process.env.MOLA_PORT
@@ -119,13 +130,20 @@ async function reportImageAge() {
   console.log(`  ${dim('Refresh it with')} mola start --refresh-image\n`);
 }
 
+const hostArch = normalizeArchitecture(host.platform, host.arch);
+
 if (host.image && refresh) {
   console.log(bold('\nMola engine\n'));
   console.log('  refreshing the guest image\n');
   try {
-    await downloadImage();
+    await downloadImage({ hostArch });
   } catch (error) {
-    console.log(`\n${red('Could not fetch the guest image.')} ${error.message}\n`);
+    if (error.code === 'ARCH_MISMATCH') {
+      console.log(`\n${red('Architecture mismatch.')}\n`);
+      console.log(`  ${error.message}\n`);
+    } else {
+      console.log(`\n${red('Could not fetch the guest image.')} ${error.message}\n`);
+    }
     console.log(`  The image already on disk is untouched.\n`);
     process.exit(1);
   }
@@ -140,11 +158,15 @@ if (!host.image) {
   // build path stays available for anyone who wants to make their own.
   console.log('');
   try {
-    await downloadImage();
+    await downloadImage({ hostArch });
   } catch (error) {
     if (error.code === 'NO_MANIFEST') {
       console.log(`  ${dim('no prebuilt image available:')} ${dim(manifestUrl())}`);
       explainMissingImage(host);
+    } else if (error.code === 'ARCH_MISMATCH') {
+      console.log(`\n${red('Architecture mismatch.')}\n`);
+      console.log(`  ${error.message}\n`);
+      console.log(`  Build a compatible image yourself: ${dim('https://mola.sh/#image')}\n`);
     } else {
       console.log(`\n${red('Could not fetch the guest image.')} ${error.message}\n`);
       console.log(`  Retry, or build one yourself: ${dim('https://mola.sh/#image')}\n`);

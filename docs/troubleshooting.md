@@ -26,6 +26,23 @@ up. Its errors are printed with a `[runtime]` prefix above that line. The most
 common cause is a Python that cannot import its dependencies; delete
 `~/.mola/python` and start again to rebuild the virtualenv.
 
+## Architecture mismatch during image download
+
+**`Architecture mismatch: host is x86_64, but image ... is aarch64`** (or the
+reverse) means the downloaded image was built for a different CPU architecture
+than your machine. Images must match the host architecture to run natively under
+KVM or HVF.
+
+The default Omarchy image is currently only built for Apple Silicon (aarch64).
+On Linux x86_64 hosts, use the Ubuntu desktop image instead:
+
+```sh
+MOLA_IMAGE_REF=ubuntu-agent:0.1.0 npx mola-core
+```
+
+Or build a compatible image yourself with `bin/native-prepare`. See
+[Getting started](getting-started.md#building-your-own-image) for details.
+
 ## A machine never reaches ready
 
 Look at its console log:
