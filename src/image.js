@@ -224,8 +224,13 @@ export async function imageStatus({ url = manifestUrl(), timeout = 4000 } = {}) 
  *
  * Builds into a sibling directory and renames on success, so an interrupted
  * download never leaves a half-image that looks complete to the next run.
+ *
+ * @param {Object} options
+ * @param {string} options.url - The manifest URL
+ * @param {Function} options.log - Logging function
+ * @param {string} options.hostArch - The host architecture ('x86_64' or 'aarch64')
  */
-export async function downloadImage({ url = manifestUrl(), log = console.log } = {}) {
+export async function downloadImage({ url = manifestUrl(), log = console.log, hostArch = null } = {}) {
   const final = imageDir();
   const staging = `${final}.incoming`;
 
@@ -236,6 +241,21 @@ export async function downloadImage({ url = manifestUrl(), log = console.log } =
     throw error;
   }
   const manifest = await response.json();
+
+  // Validate architecture if both manifest and host specify it
+  if (hostArch && manifest.architecture) {
+    if (manifest.architecture !== hostArch) {
+      const error = new Error(
+        `Image architecture mismatch: host is ${hostArch}, but image ${manifest.version ?? 'manifest'} is ${manifest.architecture}. ` +
+        `This image cannot run on this machine. ` +
+        (hostArch === 'x86_64' 
+          ? `For x86_64 hosts, try the Ubuntu image: set MOLA_IMAGE_REF=ubuntu-agent:0.1.0 or build a compatible image.`
+          : `For aarch64 hosts, ensure you're using a compatible image.`)
+      );
+      error.code = 'ARCH_MISMATCH';
+      throw error;
+    }
+  }
 
   log(`  fetching guest image ${manifest.version ?? ''}`.trimEnd());
 
